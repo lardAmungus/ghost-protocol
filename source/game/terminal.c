@@ -65,11 +65,14 @@ int terminal_typewriter(int tx, int ty, const char* text, int* char_pos, int* ti
     (*timer)++;
     if (*timer >= 2) {
         *timer = 0;
-        /* Print next character */
+        /* Only advance if character fits on screen — stop streaming at col 29 */
         if (tx + *char_pos < 30) {
             text_put_char(tx + *char_pos, ty, text[*char_pos]);
+            (*char_pos)++;
+        } else {
+            /* Column full — skip remaining characters and signal done */
+            *char_pos = len;
         }
-        (*char_pos)++;
     }
     return *char_pos >= len;
 }

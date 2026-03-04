@@ -37,7 +37,8 @@ def grid16_to_tiles(grid):
     tiles = [[], [], [], []]
     for y in range(16):
         px = parse_row(grid[y])
-        assert len(px) == 16, f"Row {y}: expected 16 pixels, got {len(px)}"
+        if len(px) != 16:
+            raise ValueError(f"Row {y}: expected 16 pixels, got {len(px)}")
         left = row_to_u32(px[:8])
         right = row_to_u32(px[8:])
         if y < 8:
@@ -51,7 +52,8 @@ def grid32_to_tiles(grid):
     tiles = [[] for _ in range(16)]
     for y in range(32):
         px = parse_row(grid[y])
-        assert len(px) == 32, f"Row {y}: expected 32 pixels, got {len(px)}"
+        if len(px) != 32:
+            raise ValueError(f"Row {y}: expected 32 pixels, got {len(px)}")
         tr = y // 8  # tile row 0-3
         pr = y % 8   # pixel row within tile
         for tc in range(4):
@@ -64,7 +66,8 @@ def grid8_to_tile(grid):
     tile = []
     for y in range(8):
         px = parse_row(grid[y])
-        assert len(px) == 8
+        if len(px) != 8:
+            raise ValueError(f"Row {y}: expected 8 pixels, got {len(px)}")
         tile.append(row_to_u32(px))
     return tile
 

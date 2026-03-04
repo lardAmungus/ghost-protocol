@@ -98,9 +98,9 @@ void bugbounty_add_kill_score(int enemy_tier, int rarity) {
     int rarity_bonus = rarity * 10;
     int total = base + rarity_bonus;
 
-    /* Clamp to u16 */
-    int new_score = bb_state.score + total;
-    if (new_score > 0xFFFF) new_score = 0xFFFF;
+    /* Clamp to u16 — use u32 accumulator to avoid signed/unsigned ambiguity */
+    u32 new_score = (u32)bb_state.score + (u32)total;
+    if (new_score > 0xFFFFU) new_score = 0xFFFFU;
     bb_state.score = (u16)new_score;
 
     if (bb_state.kills < 255) bb_state.kills++;
@@ -109,10 +109,10 @@ void bugbounty_add_kill_score(int enemy_tier, int rarity) {
 void bugbounty_complete(void) {
     if (!bb_state.active) return;
 
-    /* Completion bonus: 100 * (tier + 1) */
-    int bonus = 100 * (bb_state.tier + 1);
-    int new_score = bb_state.score + bonus;
-    if (new_score > 0xFFFF) new_score = 0xFFFF;
+    /* Completion bonus: 100 * (tier + 1) — u32 accumulator for safe clamp */
+    u32 bonus = (u32)(100 * (bb_state.tier + 1));
+    u32 new_score = (u32)bb_state.score + bonus;
+    if (new_score > 0xFFFFU) new_score = 0xFFFFU;
     bb_state.score = (u16)new_score;
 
     /* Update per-tier high score */

@@ -59,10 +59,12 @@ void loot_generate(LootItem* out, int tier, int rarity_floor, int player_lck) {
     out->type = (u8)rand_range(WEAPON_TYPE_COUNT);
     out->rarity = (u8)rarity;
 
-    /* Base damage scales with tier and rarity */
+    /* Base damage scales with tier and rarity — capped to u8 max */
     int base_dmg = 3 + tier * 2;
     int rarity_bonus = rarity * 2;
-    out->stat1 = (u8)(base_dmg + rarity_bonus + (int)rand_range(4));
+    int dmg = base_dmg + rarity_bonus + (int)rand_range(4);
+    if (dmg > 255) dmg = 255;
+    out->stat1 = (u8)dmg;
 
     /* Fire rate — lower is faster. Varies by weapon type */
     int base_rate;
@@ -96,13 +98,13 @@ const char* loot_get_name(const LootItem* item) {
     const char* type = weapon_type_names[item->type % WEAPON_TYPE_COUNT];
     const char* suffix = loot_suffixes[item->suffix_id % SUFFIX_COUNT];
 
-    /* Simple concatenation */
+    /* Simple concatenation — guards before every write to prevent OOB */
     int pos = 0;
     for (int i = 0; prefix[i] && pos < 12; i++) name_buf[pos++] = prefix[i];
-    name_buf[pos++] = ' ';
+    if (pos < 47) name_buf[pos++] = ' ';
     for (int i = 0; type[i] && pos < 22; i++) name_buf[pos++] = type[i];
-    name_buf[pos++] = ' ';
-    for (int i = 0; suffix[i] && pos < 30; i++) name_buf[pos++] = suffix[i];
+    if (pos < 47) name_buf[pos++] = ' ';
+    for (int i = 0; suffix[i] && pos < 47; i++) name_buf[pos++] = suffix[i];
     name_buf[pos] = '\0';
     return name_buf;
 }

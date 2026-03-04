@@ -176,6 +176,7 @@ void hud_draw(void) {
         if (notify_timer > 30 || (notify_timer & 4)) {
             int len = 0;
             while (notify_msg[len]) len++;
+            if (len > 30) len = 30; /* Cap to screen width */
             int tx = (30 - len) / 2;
             if (tx < 0) tx = 0;
             text_print(tx, 10, notify_msg);

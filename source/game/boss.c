@@ -801,8 +801,12 @@ void boss_damage(int dmg) {
         actual = dmg * scale >> 8;
         if (actual < 1) actual = 1;
     } else if (boss_state.phase != BPHASE_DEAD) {
-        actual = (dmg + 1) >> 1;
-        if (actual < 1) actual = 1;
+        if (dmg > 0) {
+            actual = (dmg + 1) >> 1;
+            if (actual < 1) actual = 1;
+        } else {
+            actual = 0;
+        }
     }
     int was_above_half = (boss_state.hp * 2 >= boss_state.max_hp);
     boss_state.hp -= (s16)actual;

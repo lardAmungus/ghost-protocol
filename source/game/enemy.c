@@ -377,6 +377,8 @@ static int entity_to_slot(Entity* e) {
 }
 
 Entity* enemy_spawn(int subtype, int tile_x, int tile_y, int tier) {
+    if (subtype < 0 || subtype >= ENEMY_TYPE_COUNT) return NULL;
+
     int slot = find_free_slot();
     if (slot < 0) return NULL;
 
