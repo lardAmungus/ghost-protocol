@@ -1,0 +1,20 @@
+# Build output
+build/
+*.gba
+*.elf
+*.map
+*.sav
+*.o
+*.d
+*.dep
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*~
