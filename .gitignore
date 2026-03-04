@@ -1,6 +1,7 @@
 # Build output
 build/
 *.gba
+!ghost-protocol.gba
 *.elf
 *.map
 *.sav
