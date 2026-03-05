@@ -3,6 +3,7 @@
 static const u8* col_map = NULL;
 static int col_width  = 0;
 static int col_height = 0;
+int collision_tesla_active = 0; /* Toggled by state_net every 90 frames */
 
 void collision_set_map(const u8* map, int width_tiles, int height_tiles) {
     col_map = map;
@@ -26,7 +27,10 @@ IWRAM_CODE int collision_point_solid(int px, int py) {
 
 IWRAM_CODE int collision_point_hazard(int px, int py) {
     int tile = collision_tile_at(px, py);
-    return tile == TILE_HAZARD;
+    if (tile == TILE_HAZARD) return 1;
+    if (tile == TILE_TESLA && collision_tesla_active) return 1;
+    if (tile == TILE_CORRUPT) return 1;
+    return 0;
 }
 
 IWRAM_CODE int collision_rect_solid(int px, int py, int pw, int ph) {

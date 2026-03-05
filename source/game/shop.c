@@ -5,6 +5,8 @@
 #include "game/terminal.h"
 #include "game/player.h"
 #include "game/loot.h"
+#include "game/hud.h"
+#include "game/common.h"
 #include "engine/text.h"
 #include "engine/audio.h"
 
@@ -94,6 +96,22 @@ int shop_buy(int cursor) {
     }
 
     audio_play_sfx(SFX_PICKUP);
+
+    /* Purchase notification */
+    switch (cursor) {
+    case SHOP_ATK_UP:       hud_notify("ATK +1!", 45); break;
+    case SHOP_DEF_UP:       hud_notify("DEF +1!", 45); break;
+    case SHOP_SPD_UP:       hud_notify("SPD +1!", 45); break;
+    case SHOP_LCK_UP:       hud_notify("LCK +1!", 45); break;
+    case SHOP_SHIELD_PROG:  hud_notify("HP FULL!", 45); break;
+    case SHOP_SPEED_PROG:   hud_notify("HP +5!", 45); break;
+    }
+
+    /* Check millionaire achievement on credit spending too (tracks accumulation) */
+    if (player_state.credits + (u16)price >= 10000) {
+        ach_unlock_celebrate(ACH_MILLIONAIRE);
+    }
+
     return 1;
 }
 
@@ -108,6 +126,28 @@ int shop_sell(int inv_idx) {
 
     inventory_remove(inv_idx);
     audio_play_sfx(SFX_PICKUP);
+
+    /* Sell notification with credit value */
+    {
+        static char sell_buf[12];
+        sell_buf[0] = '+';
+        /* Simple int to string for value */
+        int v = value;
+        int digits = 0;
+        char tmp[6];
+        do { tmp[digits++] = (char)('0' + v % 10); v /= 10; } while (v > 0);
+        for (int j = 0; j < digits; j++) sell_buf[1 + j] = tmp[digits - 1 - j];
+        sell_buf[1 + digits] = 'c';
+        sell_buf[2 + digits] = 'r';
+        sell_buf[3 + digits] = '\0';
+        hud_notify(sell_buf, 30);
+    }
+
+    /* Check millionaire achievement */
+    if (player_state.credits >= 10000) {
+        ach_unlock_celebrate(ACH_MILLIONAIRE);
+    }
+
     return value;
 }
 

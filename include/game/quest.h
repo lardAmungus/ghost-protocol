@@ -6,9 +6,9 @@
 /*
  * Ghost Protocol — Quest / Contract System
  *
- * 20 story missions across 5 acts (4 missions per act, boss on 4th).
+ * 30 story missions across 6 acts (5 missions per act, boss on 5th).
  * Procedural side contracts for grinding XP/credits/loot between missions.
- * Story: The Glitch → Traceback → Deep Packet → Zero Day → Ghost Protocol
+ * Story: The Glitch → Traceback → Deep Packet → Zero Day → Ghost Protocol → Trace Route
  */
 
 /* Contract types */
@@ -22,8 +22,8 @@ enum {
 };
 
 /* Story mission count */
-#define STORY_MISSIONS 20
-#define MISSIONS_PER_ACT 4
+#define STORY_MISSIONS 30
+#define MISSIONS_PER_ACT 5
 
 /* Contract tier determines difficulty + rewards */
 #define MAX_CONTRACTS 8
@@ -45,7 +45,8 @@ typedef struct {
 typedef struct {
     u8  current_act;           /* Story act 0-5 (derived from story_mission) */
     u8  story_mission;         /* Highest completed story mission (0-20) */
-    u8  boss_defeated[5];      /* Which story bosses beaten */
+    u8  boss_defeated[6];      /* Which story bosses beaten (6 = DAEMON) */
+    u8  choice_flags;          /* Story choices (2 bits × 4 choices) */
     u8  active_contract_idx;   /* Index of current contract (-1=none) */
     u8  contracts_completed;   /* Total side contracts completed */
     Contract contracts[MAX_CONTRACTS];
@@ -54,14 +55,23 @@ typedef struct {
 extern QuestState quest_state;
 
 /* ---- Story dialogue system ---- */
-#define STORY_DIALOGUE_MAX_PAGES 6
-#define STORY_DIALOGUE_COUNT 14
+#define STORY_DIALOGUE_MAX_PAGES 8
+#define STORY_DIALOGUE_COUNT 28
+
+/* Speaker palette indices */
+#define SP_ZERO   2  /* Cyan for ZERO */
+#define SP_AXIOM  3  /* Red for AXIOM */
+#define SP_PROXY  1  /* Amber for PROXY */
+#define SP_GLITCH 0  /* Green for GLITCH (magenta in-game via pal tweak) */
 
 typedef struct {
     u8  trigger_mission;    /* Show after completing this mission (0=first entry) */
-    u8  num_pages;
+    u8  num_pages;          /* Up to 8 pages */
     u8  speaker_pal[STORY_DIALOGUE_MAX_PAGES]; /* TPAL_* for speaker color */
     const char* pages[STORY_DIALOGUE_MAX_PAGES];
+    u8  choice_bit;         /* Which choice_flags bit (0=none, 1-4=choice slot) */
+    const char* choice_a;   /* Text for option A (NULL=no choice) */
+    const char* choice_b;   /* Text for option B */
 } StoryDialogue;
 
 /* Get story dialogue triggered after completing a mission (or NULL). */

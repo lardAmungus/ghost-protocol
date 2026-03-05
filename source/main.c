@@ -12,6 +12,7 @@
 #include "engine/audio.h"
 #include "engine/text.h"
 #include "engine/rng.h"
+#include "game/common.h"
 #include "states/state_title.h"
 #include "states/state_charsel.h"
 #include "states/state_terminal.h"
@@ -116,9 +117,10 @@ int main(void) {
         mgba_printf(MGBA_LOG_INFO, "=== Ghost Protocol boot ===");
     }
 
-    /* Start hardware timers for RNG seeding */
-    REG_TM0CNT_H = TM_ENABLE;
-    REG_TM1CNT_H = TM_ENABLE | TM_CASCADE;
+    /* Start hardware timers for RNG seeding — use TM2/TM3 to avoid
+     * conflicting with Maxmod which owns Timer 0 for DMA audio. */
+    REG_TM2CNT_H = TM_ENABLE;
+    REG_TM3CNT_H = TM_ENABLE | TM_CASCADE;
 
     /* Initialize engine subsystems */
     video_init();
@@ -148,6 +150,8 @@ int main(void) {
         if (state_table[current_state].draw) {
             state_table[current_state].draw();
         }
+
+        game_stats.play_time_frames++;
 
         video_vsync();
         audio_update();

@@ -9,6 +9,7 @@
 #include "engine/text.h"
 #include "engine/input.h"
 #include "engine/audio.h"
+#include "engine/video.h"
 #include "engine/save.h"
 #include "engine/rng.h"
 #include "game/terminal.h"
@@ -18,6 +19,7 @@
 #include "game/loot.h"
 #include "game/bugbounty.h"
 #include "game/boss.h"
+#include "game/enemy.h"
 #include "game/hud.h"
 #include "states/state_ids.h"
 #include "states/state_terminal.h"
@@ -34,6 +36,11 @@ enum {
     TSUB_HELP,
     TSUB_BB_RESULTS,
     TSUB_STORY,
+    TSUB_SKILLS,
+    TSUB_EVOLUTION,
+    TSUB_CODEX,
+    TSUB_CRAFT,
+    TSUB_BRIEFING,
 };
 
 static int sub_state;
@@ -42,11 +49,22 @@ static int initialized;
 static int inv_scroll;       /* Inventory scroll offset */
 static int save_slot;        /* Selected save slot (0-2) */
 static int save_msg_timer;   /* "Saved!" message timer */
+static int save_confirm;     /* 1=awaiting overwrite confirmation */
 static int help_page;        /* Selected topic index (0-8) */
 static int help_mode;        /* 0=topic index, 1=topic detail */
 static int last_dialogue_mission; /* Last dialogue shown (avoid re-showing) */
 static int story_page;       /* Current page in story dialogue */
 static const StoryDialogue* active_dialogue; /* Current story dialogue being shown */
+static int codex_category;   /* 0=enemies, 1=bosses, 2=weapons */
+static int codex_mode;       /* 0=category list, 1=entry list */
+static int stats_page;       /* 0=character, 1=combat stats */
+static int boot_done;        /* Boot sequence completed flag */
+static int boot_timer;       /* Boot sequence frame counter */
+static int craft_mode;       /* 0=menu, 1=select items for fuse, 2=select for salvage, 3=select for forge */
+static int craft_sel[3];     /* Selected inventory indices for fuse (up to 3) */
+static int craft_sel_count;  /* Number of items selected for fuse */
+static int choice_active;    /* 1 = showing choice menu */
+static int choice_cursor;    /* 0 = option A, 1 = option B */
 
 /* ---- Save/Load helpers ---- */
 
@@ -72,7 +90,7 @@ static void pack_save(SaveData* sd) {
     sd->ability_unlocks = player_state.ability_unlocks;
     sd->quest_act = quest_state.current_act;
     sd->story_mission = quest_state.story_mission;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         sd->boss_defeated[i] = quest_state.boss_defeated[i];
     }
     sd->contracts_completed = quest_state.contracts_completed;
@@ -98,6 +116,34 @@ static void pack_save(SaveData* sd) {
 
     /* Pack bug bounty state */
     bugbounty_pack(sd->bb_high_scores, &sd->bb_highest_unlocked, &sd->bb_total_runs);
+
+    /* Pack skill tree & evolution */
+    for (int i = 0; i < SKILL_TREE_SIZE; i++) {
+        sd->skill_tree[i] = player_state.skill_tree[i];
+    }
+    sd->evolution = player_state.evolution;
+    sd->skill_points = player_state.skill_points;
+    sd->craft_shards = player_state.craft_shards;
+
+    /* Pack game statistics */
+    sd->ng_plus = game_stats.ng_plus;
+    sd->choice_flags = game_stats.choice_flags;
+    sd->play_time_frames = game_stats.play_time_frames;
+    sd->total_kills = game_stats.total_kills;
+    sd->total_deaths = game_stats.total_deaths;
+    sd->damage_dealt = game_stats.damage_dealt;
+    sd->damage_taken = game_stats.damage_taken;
+    sd->items_found = game_stats.items_found;
+    sd->items_crafted = game_stats.items_crafted;
+    sd->highest_combo = game_stats.highest_combo;
+    sd->contracts_done = game_stats.contracts_done;
+    sd->bb_endgame_contracts = game_stats.bb_endgame_contracts;
+    sd->bb_boss_contracts = game_stats.bb_boss_contracts;
+    sd->bb_threat_level = game_stats.bb_threat_level;
+    sd->bb_highest_level = game_stats.bb_highest_level;
+    sd->endgame_unlocked = game_stats.endgame_unlocked;
+    for (int i = 0; i < 3; i++) sd->achievements[i] = game_stats.achievements[i];
+    for (int i = 0; i < 32; i++) sd->codex_unlocks[i] = game_stats.codex_unlocks[i];
 }
 
 static void unpack_save(const SaveData* sd) {
@@ -115,7 +161,7 @@ static void unpack_save(const SaveData* sd) {
 
     quest_state.current_act = sd->quest_act;
     quest_state.story_mission = sd->story_mission;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         quest_state.boss_defeated[i] = sd->boss_defeated[i];
     }
     quest_state.contracts_completed = sd->contracts_completed;
@@ -134,6 +180,34 @@ static void unpack_save(const SaveData* sd) {
 
     /* Restore bug bounty state */
     bugbounty_restore(sd->bb_high_scores, sd->bb_highest_unlocked, sd->bb_total_runs);
+
+    /* Restore skill tree & evolution */
+    for (int i = 0; i < SKILL_TREE_SIZE; i++) {
+        player_state.skill_tree[i] = sd->skill_tree[i];
+    }
+    player_state.evolution = sd->evolution;
+    player_state.skill_points = sd->skill_points;
+    player_state.craft_shards = sd->craft_shards;
+
+    /* Restore game statistics */
+    game_stats.ng_plus = sd->ng_plus;
+    game_stats.choice_flags = sd->choice_flags;
+    game_stats.play_time_frames = sd->play_time_frames;
+    game_stats.total_kills = sd->total_kills;
+    game_stats.total_deaths = sd->total_deaths;
+    game_stats.damage_dealt = sd->damage_dealt;
+    game_stats.damage_taken = sd->damage_taken;
+    game_stats.items_found = sd->items_found;
+    game_stats.items_crafted = sd->items_crafted;
+    game_stats.highest_combo = sd->highest_combo;
+    game_stats.contracts_done = sd->contracts_done;
+    game_stats.bb_endgame_contracts = sd->bb_endgame_contracts;
+    game_stats.bb_boss_contracts = sd->bb_boss_contracts;
+    game_stats.bb_threat_level = sd->bb_threat_level;
+    game_stats.bb_highest_level = sd->bb_highest_level;
+    game_stats.endgame_unlocked = sd->endgame_unlocked;
+    for (int i = 0; i < 3; i++) game_stats.achievements[i] = sd->achievements[i];
+    for (int i = 0; i < 32; i++) game_stats.codex_unlocks[i] = sd->codex_unlocks[i];
 
     /* Regenerate contracts for current level */
     quest_generate_contracts(player_state.level);
@@ -166,15 +240,21 @@ void state_terminal_preload_slot(int slot) {
 }
 
 void state_terminal_enter(void) {
-    REG_DISPCNT = DCNT_MODE0 | DCNT_BG0;
+    REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_BG1;
     text_clear_all();
     terminal_init_palette();
+    terminal_load_bg();
 
     sub_state = TSUB_MAIN;
     cursor = 0;
     inv_scroll = 0;
     save_slot = 0;
     save_msg_timer = 0;
+    boot_done = 0;
+    boot_timer = 0;
+    choice_active = 0;
+    choice_cursor = 0;
+    video_fadein_start(30); /* Fade in from black over 0.5s */
 
     /* Initialize systems on first visit */
     if (!initialized) {
@@ -251,12 +331,38 @@ static void update_main(void) {
             break;
         case TMENU_STATS:
             sub_state = TSUB_STATS;
+            stats_page = 0;
             text_clear_all();
             break;
         case TMENU_INVENTORY:
             sub_state = TSUB_INVENTORY;
             cursor = 0;
             inv_scroll = 0;
+            text_clear_all();
+            break;
+        case TMENU_SKILLS:
+            /* Check if evolution is pending first */
+            if (player_state.evolution_pending && player_state.evolution == EVOLUTION_NONE) {
+                sub_state = TSUB_EVOLUTION;
+                cursor = 0;
+                text_clear_all();
+            } else {
+                sub_state = TSUB_SKILLS;
+                cursor = 0;
+                text_clear_all();
+            }
+            break;
+        case TMENU_CODEX:
+            sub_state = TSUB_CODEX;
+            codex_mode = 0;
+            cursor = 0;
+            text_clear_all();
+            break;
+        case TMENU_CRAFT:
+            sub_state = TSUB_CRAFT;
+            craft_mode = 0;
+            craft_sel_count = 0;
+            cursor = 0;
             text_clear_all();
             break;
         case TMENU_JACK_IN:
@@ -281,7 +387,8 @@ static void update_main(void) {
                 }
             }
             if (c) {
-                game_request_state = STATE_NET;
+                sub_state = TSUB_BRIEFING;
+                text_clear_all();
             } else {
                 text_print(2, 17, "No contracts!");
             }
@@ -290,6 +397,7 @@ static void update_main(void) {
         case TMENU_SAVE:
             sub_state = TSUB_SAVE;
             save_slot = 0;
+            save_confirm = 0;
             text_clear_all();
             break;
         case TMENU_HELP:
@@ -305,6 +413,7 @@ static void update_main(void) {
 
 static void update_contracts(void) {
     if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
         text_clear_all();
@@ -346,6 +455,7 @@ static void update_contracts(void) {
 
 static void update_shop(void) {
     if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
         text_clear_all();
@@ -370,6 +480,7 @@ static void update_shop(void) {
 
 static void update_inventory(void) {
     if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
         text_clear_all();
@@ -391,9 +502,9 @@ static void update_inventory(void) {
         text_clear_all();
     }
 
-    /* Scroll if needed */
+    /* Scroll if needed — 4 items visible (3 rows each: name+stats+gap, rows 4-15) */
     if (cursor < inv_scroll) inv_scroll = cursor;
-    if (cursor >= inv_scroll + 6) inv_scroll = cursor - 5;
+    if (cursor >= inv_scroll + 4) inv_scroll = cursor - 3;
 
     if (input_hit(KEY_A)) {
         /* Equip selected item */
@@ -436,7 +547,29 @@ static void update_inventory(void) {
 }
 
 static void update_save(void) {
+    /* Overwrite confirmation sub-state */
+    if (save_confirm) {
+        if (input_hit(KEY_A)) {
+            /* Confirmed — save */
+            static EWRAM_BSS SaveData sd_save;
+            pack_save(&sd_save);
+            save_write_slot(&sd_save, save_slot);
+            audio_play_sfx(SFX_SAVE);
+            save_msg_timer = 60;
+            save_confirm = 0;
+            text_clear_all();
+        }
+        if (input_hit(KEY_B)) {
+            /* Cancel overwrite */
+            audio_play_sfx(SFX_MENU_BACK);
+            save_confirm = 0;
+            text_clear_all();
+        }
+        return;
+    }
+
     if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
         text_clear_all();
@@ -454,13 +587,20 @@ static void update_save(void) {
         text_clear_all();
     }
     if (input_hit(KEY_A)) {
-        /* Save to selected slot (EWRAM to avoid 512B on stack) */
-        static EWRAM_BSS SaveData sd_save;
-        pack_save(&sd_save);
-        save_write_slot(&sd_save, save_slot);
-        audio_play_sfx(SFX_SAVE);
-        save_msg_timer = 60;
-        text_clear_all();
+        if (save_slot_exists(save_slot)) {
+            /* Slot occupied — ask for confirmation */
+            save_confirm = 1;
+            audio_play_sfx(SFX_MENU_SELECT);
+            text_clear_all();
+        } else {
+            /* Empty slot — save directly */
+            static EWRAM_BSS SaveData sd_save;
+            pack_save(&sd_save);
+            save_write_slot(&sd_save, save_slot);
+            audio_play_sfx(SFX_SAVE);
+            save_msg_timer = 60;
+            text_clear_all();
+        }
     }
     if (input_hit(KEY_R)) {
         /* Load from selected slot (EWRAM to avoid 512B on stack) */
@@ -478,6 +618,7 @@ static void update_save(void) {
 
 static void update_bugbounty(void) {
     if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
         text_clear_all();
@@ -545,6 +686,7 @@ static void update_help(void) {
     if (help_mode == 0) {
         /* Index selection */
         if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
             sub_state = TSUB_MAIN;
             cursor = 0;
             text_clear_all();
@@ -578,21 +720,72 @@ static void update_story(void) {
         text_clear_all();
         return;
     }
+
+    /* Choice menu active */
+    if (choice_active) {
+        if (input_hit(KEY_UP) || input_hit(KEY_DOWN)) {
+            choice_cursor ^= 1;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_A)) {
+            /* Store choice in game_stats.choice_flags */
+            int bit = active_dialogue->choice_bit;
+            if (bit >= 1 && bit <= 4) {
+                int shift = (bit - 1) * 2;
+                /* Clear old bits, set new choice (0=A, 1=B) */
+                game_stats.choice_flags = (u8)(
+                    (game_stats.choice_flags & ~(3 << shift)) |
+                    (choice_cursor << shift));
+            }
+            audio_play_sfx(SFX_TRANSITION);
+            choice_active = 0;
+            active_dialogue = NULL;
+            sub_state = TSUB_MAIN;
+            cursor = 0;
+            text_clear_all();
+        }
+        return;
+    }
+
     if (input_hit(KEY_A) || input_hit(KEY_B)) {
         story_page++;
         audio_play_sfx(SFX_MENU_SELECT);
         text_clear_all();
         if (story_page >= active_dialogue->num_pages) {
-            /* Dialogue complete */
-            active_dialogue = NULL;
-            sub_state = TSUB_MAIN;
-            cursor = 0;
+            /* Check for choice at end of dialogue */
+            if (active_dialogue->choice_a != NULL) {
+                choice_active = 1;
+                choice_cursor = 0;
+                text_clear_all();
+            } else {
+                /* Dialogue complete — no choice */
+                active_dialogue = NULL;
+                sub_state = TSUB_MAIN;
+                cursor = 0;
+            }
         }
     }
 }
 
 static void draw_story(void) {
-    if (!active_dialogue || story_page >= active_dialogue->num_pages) return;
+    if (!active_dialogue) return;
+
+    /* Choice screen */
+    if (choice_active && active_dialogue->choice_a) {
+        terminal_print_pal(2, 3, "== CHOOSE YOUR PATH ==", TPAL_AMBER);
+        /* Option A */
+        text_put_char(4, 8, choice_cursor == 0 ? '>' : ' ');
+        terminal_print_pal(6, 8, active_dialogue->choice_a,
+                           choice_cursor == 0 ? TPAL_CYAN : TPAL_GREEN);
+        /* Option B */
+        text_put_char(4, 11, choice_cursor == 1 ? '>' : ' ');
+        terminal_print_pal(6, 11, active_dialogue->choice_b,
+                           choice_cursor == 1 ? TPAL_CYAN : TPAL_GREEN);
+        terminal_print_pal(3, 18, "[A]:Select  [UP/DN]:Switch", TPAL_GREEN);
+        return;
+    }
+
+    if (story_page >= active_dialogue->num_pages) return;
 
     /* Dark border frame */
     terminal_print_pal(2, 1, ">> INCOMING SIGNAL <<", TPAL_AMBER);
@@ -635,8 +828,662 @@ static void update_bb_results(void) {
     }
 }
 
+/* Forward declaration — defined later in draw section */
+static void draw_status_bar(void);
+
+/* ---- Skill tree sub-state ---- */
+static int skill_branch; /* 0=offense, 1=defense, 2=utility */
+
+static void update_skills(void) {
+    if (input_hit(KEY_B)) {
+        audio_play_sfx(SFX_MENU_BACK);
+        sub_state = TSUB_MAIN;
+        cursor = 0;
+        text_clear_all();
+        return;
+    }
+    /* LEFT/RIGHT to change branch */
+    if (input_hit(KEY_LEFT) && skill_branch > 0) {
+        skill_branch--;
+        audio_play_sfx(SFX_MENU_SELECT);
+        text_clear_all();
+    }
+    if (input_hit(KEY_RIGHT) && skill_branch < 2) {
+        skill_branch++;
+        audio_play_sfx(SFX_MENU_SELECT);
+        text_clear_all();
+    }
+    /* UP/DOWN to select skill in branch */
+    if (input_hit(KEY_DOWN) && cursor < SKILLS_PER_BRANCH - 1) {
+        cursor++;
+        audio_play_sfx(SFX_MENU_SELECT);
+    }
+    if (input_hit(KEY_UP) && cursor > 0) {
+        cursor--;
+        audio_play_sfx(SFX_MENU_SELECT);
+    }
+    /* A to allocate skill point */
+    if (input_hit(KEY_A)) {
+        int idx = skill_branch * SKILLS_PER_BRANCH + cursor;
+        if (player_skill_allocate(idx)) {
+            audio_play_sfx(SFX_MENU_SELECT);
+            hud_notify("SKILL UP!", 45);
+            text_clear_all();
+        } else {
+            audio_play_sfx(SFX_MENU_BACK);
+        }
+    }
+}
+
+static const char* const skill_names[CLASS_COUNT][SKILL_TREE_SIZE] = {
+    [CLASS_ASSAULT] = {
+        /* Offense */  "Crit Chance", "ATK Boost", "Charge Spd", "AoE Radius",
+        /* Defense */  "Max HP", "DEF Boost", "HP Regen", "Resist",
+        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
+    },
+    [CLASS_INFILTRATOR] = {
+        /* Offense */  "Crit Chance", "ATK Boost", "Fire Rate", "Pierce",
+        /* Defense */  "Max HP", "DEF Boost", "Evasion", "Resist",
+        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
+    },
+    [CLASS_TECHNOMANCER] = {
+        /* Offense */  "Crit Chance", "ATK Boost", "Proj Count", "Beam Width",
+        /* Defense */  "Max HP", "DEF Boost", "Shield Dur", "Resist",
+        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
+    },
+};
+
+static const char* const branch_names[3] = { "OFFENSE", "DEFENSE", "UTILITY" };
+
+static void draw_skills(void) {
+    int cls = player_state.player_class % CLASS_COUNT;
+    terminal_print_pal(2, 1, "SKILL TREE", TPAL_AMBER);
+
+    /* Show SP remaining */
+    text_print(18, 1, "SP:");
+    text_print_int(21, 1, player_state.skill_points);
+
+    /* Show evolution if any */
+    if (player_state.evolution != EVOLUTION_NONE) {
+        text_print(2, 2, "Class:");
+        terminal_print_pal(9, 2, player_get_evolution_name(), TPAL_CYAN);
+    }
+
+    /* Branch tabs */
+    for (int b = 0; b < 3; b++) {
+        int col = 2 + b * 9;
+        if (b == skill_branch) {
+            terminal_print_pal(col, 4, branch_names[b], TPAL_CYAN);
+        } else {
+            text_print(col, 4, branch_names[b]);
+        }
+    }
+    text_print(2, 5, "----------------------------");
+
+    /* Skills in current branch */
+    for (int s = 0; s < SKILLS_PER_BRANCH; s++) {
+        int row = 7 + s * 2;
+        int idx = skill_branch * SKILLS_PER_BRANCH + s;
+        int rank = player_state.skill_tree[idx];
+
+        /* Cursor */
+        if (s == cursor) {
+            text_print(2, row, ">");
+        } else {
+            text_print(2, row, " ");
+        }
+
+        /* Skill name */
+        const char* name = skill_names[cls][idx];
+        text_print(4, row, name);
+
+        /* Rank pips */
+        for (int r = 0; r < SKILL_MAX_RANK; r++) {
+            if (r < rank) {
+                terminal_print_pal(18 + r * 2, row, "#", TPAL_AMBER);
+            } else {
+                text_print(18 + r * 2, row, ".");
+            }
+        }
+
+        /* Bonus preview */
+        int bonus = rank * 5; /* Each rank = +5% */
+        if (bonus > 0) {
+            text_print(25, row, "+");
+            text_print_int(26, row, bonus);
+            text_print(28, row, "%");
+        }
+    }
+
+    text_print(2, 16, "A:Allocate L/R:Branch");
+    text_print(2, 17, "B:Back");
+    draw_status_bar();
+}
+
+/* ---- Codex sub-state ---- */
+
+static const char* const codex_cat_names[] = { "ENEMIES", "BOSSES", "WEAPONS" };
+#define CODEX_CAT_COUNT 3
+
+static const char* const enemy_names[ENEMY_TYPE_COUNT] = {
+    "Sentry", "Patrol", "Flyer", "Shield", "Spike", "Hunter",
+    "Drone", "Turret", "Mimic", "Corruptor", "Ghost", "Bomber",
+};
+
+/* ---- Crafting ---- */
+
+/* Get the real inventory index for the Nth non-empty slot */
+static int craft_inv_index(int nth) {
+    int idx = 0;
+    for (int i = 0; i < INVENTORY_SIZE; i++) {
+        if (inventory_get(i)) {
+            if (idx == nth) return i;
+            idx++;
+        }
+    }
+    return -1;
+}
+
+static void update_craft(void) {
+    if (input_hit(KEY_B)) {
+        if (craft_mode > 0) {
+            /* Back to craft menu */
+            craft_mode = 0;
+            craft_sel_count = 0;
+            cursor = 0;
+            text_clear_all();
+            audio_play_sfx(SFX_MENU_BACK);
+        } else {
+            audio_play_sfx(SFX_MENU_BACK);
+            sub_state = TSUB_MAIN;
+            cursor = 0;
+            text_clear_all();
+        }
+        return;
+    }
+
+    if (craft_mode == 0) {
+        /* Craft menu: Fuse / Salvage / Forge */
+        if (input_hit(KEY_DOWN)) { cursor++; if (cursor > 2) cursor = 0; audio_play_sfx(SFX_MENU_SELECT); text_clear_all(); }
+        if (input_hit(KEY_UP)) { cursor--; if (cursor < 0) cursor = 2; audio_play_sfx(SFX_MENU_SELECT); text_clear_all(); }
+        if (input_hit(KEY_A)) {
+            craft_mode = cursor + 1; /* 1=fuse, 2=salvage, 3=forge */
+            craft_sel_count = 0;
+            cursor = 0;
+            inv_scroll = 0;
+            text_clear_all();
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+    } else {
+        /* Item selection mode */
+        int count = inventory_count();
+        if (count == 0) return;
+        if (input_hit(KEY_DOWN)) { cursor++; if (cursor >= count) cursor = count - 1; audio_play_sfx(SFX_MENU_SELECT); text_clear_all(); }
+        if (input_hit(KEY_UP) && cursor > 0) { cursor--; audio_play_sfx(SFX_MENU_SELECT); text_clear_all(); }
+        if (cursor < inv_scroll) inv_scroll = cursor;
+        if (cursor >= inv_scroll + 6) inv_scroll = cursor - 5;
+
+        if (input_hit(KEY_A)) {
+            int real_idx = craft_inv_index(cursor);
+            if (real_idx < 0) return;
+
+            if (craft_mode == 1) {
+                /* Fuse: select 3 items of same rarity */
+                /* Check if already selected */
+                int dup = 0;
+                for (int i = 0; i < craft_sel_count; i++) {
+                    if (craft_sel[i] == real_idx) { dup = 1; break; }
+                }
+                if (!dup && craft_sel_count < 3) {
+                    craft_sel[craft_sel_count++] = real_idx;
+                    audio_play_sfx(SFX_MENU_SELECT);
+                }
+                if (craft_sel_count == 3) {
+                    if (craft_fuse(craft_sel[0], craft_sel[1], craft_sel[2])) {
+                        /* Success — reset */
+                        craft_sel_count = 0;
+                        cursor = 0;
+                        inv_scroll = 0;
+                    } else {
+                        hud_notify("Can't fuse!", 60);
+                        craft_sel_count = 0;
+                    }
+                    text_clear_all();
+                }
+            } else if (craft_mode == 2) {
+                /* Salvage: instant */
+                int shards = craft_salvage(real_idx);
+                if (shards > 0) {
+                    player_state.craft_shards += (u16)shards;
+                    cursor = 0;
+                    inv_scroll = 0;
+                } else {
+                    hud_notify("Can't salvage!", 60);
+                }
+                text_clear_all();
+            } else if (craft_mode == 3) {
+                /* Forge: reroll stats */
+                if (craft_forge(real_idx, &player_state.craft_shards)) {
+                    hud_notify("REFORGED!", 60);
+                    audio_play_sfx(SFX_CRAFT_SUCCESS);
+                    if (game_stats.items_crafted < 65535) game_stats.items_crafted++;
+                    if (game_stats.items_crafted >= 10) ach_unlock_celebrate(ACH_CRAFTSMAN);
+                } else {
+                    hud_notify("Not enough shards!", 60);
+                }
+                text_clear_all();
+            }
+        }
+    }
+}
+
+static void draw_craft(void) {
+    terminal_print_pal(2, 1, ">> CRAFTING <<", TPAL_AMBER);
+
+    /* Shard count */
+    text_print(2, 2, "Shards:");
+    text_print_int(10, 2, player_state.craft_shards);
+
+    if (craft_mode == 0) {
+        /* Main craft menu */
+        static const char* const craft_opts[3] = {
+            "FUSE   (3 same rarity -> 1 better)",
+            "SALVAGE (break -> shards)",
+            "FORGE   (reroll stats, costs shards)",
+        };
+        for (int i = 0; i < 3; i++) {
+            text_print(2, 4 + i * 2, (i == cursor) ? ">" : " ");
+            /* Truncate to fit 30-col screen */
+            for (int c = 0; craft_opts[i][c] && 4 + c < 29; c++)
+                text_put_char(4 + c, 4 + i * 2, craft_opts[i][c]);
+        }
+        text_print(2, 18, "A:Select  B:Back");
+    } else {
+        /* Item list with selection markers */
+        static const char* const mode_names[3] = { "FUSE", "SALVAGE", "FORGE" };
+        terminal_print_pal(2, 3, mode_names[craft_mode - 1], TPAL_CYAN);
+
+        if (craft_mode == 1) {
+            text_print(8, 3, "Select 3 items:");
+            /* Show selected count */
+            text_print_int(24, 3, craft_sel_count);
+            text_print(25, 3, "/3");
+            /* Preview result rarity if items selected */
+            if (craft_sel_count > 0) {
+                LootItem* sel0 = inventory_get(craft_sel[0]);
+                if (sel0 && sel0->rarity < RARITY_LEGENDARY) {
+                    static const char* const rar_names[] = {
+                        "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"
+                    };
+                    text_print(2, 4, "Result:");
+                    int nr = sel0->rarity + 1;
+                    int rp = (nr >= 3) ? TPAL_AMBER : TPAL_GREEN;
+                    if (nr >= 4) rp = TPAL_RED;
+                    terminal_print_pal(10, 4, rar_names[nr], rp);
+                }
+            }
+        } else if (craft_mode == 2) {
+            /* Show salvage value preview */
+            int si = craft_inv_index(cursor);
+            if (si >= 0) {
+                LootItem* sit = inventory_get(si);
+                if (sit) {
+                    int sv = loot_salvage_value(sit);
+                    text_print(8, 3, "Value:");
+                    text_print_int(15, 3, sv);
+                    text_print(17, 3, "shards");
+                }
+            }
+        } else if (craft_mode == 3) {
+            /* Show forge cost preview */
+            int ri = craft_inv_index(cursor);
+            if (ri >= 0) {
+                LootItem* it = inventory_get(ri);
+                if (it) {
+                    int cost = 5 + it->rarity * 5;
+                    text_print(8, 3, "Cost:");
+                    text_print_int(14, 3, cost);
+                }
+            }
+        }
+
+        int row = 5;
+        int idx = 0;
+        for (int i = 0; i < INVENTORY_SIZE && row < 17; i++) {
+            LootItem* item = inventory_get(i);
+            if (!item) continue;
+            if (idx < inv_scroll) { idx++; continue; }
+
+            /* Cursor */
+            text_print(2, row, (idx == cursor) ? ">" : " ");
+
+            /* Selected marker for fuse */
+            int selected = 0;
+            for (int s = 0; s < craft_sel_count; s++) {
+                if (craft_sel[s] == i) { selected = 1; break; }
+            }
+            text_put_char(3, row, selected ? '*' : ' ');
+
+            /* Item name + rarity */
+            const char* name = loot_get_name(item);
+            int pal = TPAL_GREEN;
+            if (item->rarity >= 3) pal = TPAL_AMBER; /* Epic+ */
+            if (item->rarity >= 4) pal = TPAL_RED;   /* Legendary+ */
+            terminal_print_pal(5, row, name, pal);
+
+            /* Equipped tag */
+            if (item->flags & LOOT_FLAG_EQUIPPED)
+                text_put_char(28, row, 'E');
+
+            row++;
+            idx++;
+        }
+
+        text_print(2, 18, "A:Pick  B:Back");
+    }
+    draw_status_bar();
+}
+
+static void update_codex(void) {
+    if (codex_mode == 0) {
+        /* Category list */
+        if (input_hit(KEY_DOWN) && cursor < CODEX_CAT_COUNT - 1) {
+            cursor++;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_UP) && cursor > 0) {
+            cursor--;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_A)) {
+            codex_category = cursor;
+            codex_mode = 1;
+            cursor = 0;
+            text_clear_all();
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
+            sub_state = TSUB_MAIN;
+            cursor = 0;
+            text_clear_all();
+        }
+    } else if (codex_mode == 1) {
+        /* Entry list */
+        int max_items = 0;
+        if (codex_category == 0) max_items = ENEMY_TYPE_COUNT;
+        else if (codex_category == 1) max_items = BOSS_TYPE_COUNT;
+        else max_items = WEAPON_TYPE_COUNT;
+
+        if (input_hit(KEY_DOWN) && cursor < max_items - 1) {
+            cursor++;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_UP) && cursor > 0) {
+            cursor--;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_A)) {
+            /* Only open detail if entry is unlocked */
+            int codex_id = -1;
+            if (codex_category == 0) codex_id = CODEX_ENEMY_BASE + cursor;
+            else if (codex_category == 1) codex_id = CODEX_BOSS_BASE + cursor;
+            else codex_id = CODEX_WEAPON_BASE + cursor;
+            if (codex_id >= 0 && codex_unlocked(codex_id)) {
+                codex_mode = 2;
+                text_clear_all();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+        }
+        if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
+            codex_mode = 0;
+            cursor = codex_category;
+            text_clear_all();
+        }
+    } else {
+        /* Detail view — B returns to list */
+        if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
+            codex_mode = 1;
+            text_clear_all();
+        }
+    }
+}
+
+static void draw_codex(void) {
+    if (codex_mode == 0) {
+        /* Category selection */
+        terminal_print_pal(2, 1, ">> CODEX <<", TPAL_AMBER);
+        text_print(2, 2, "-----------");
+
+        for (int i = 0; i < CODEX_CAT_COUNT; i++) {
+            int row = 4 + i * 2;
+            text_print(3, row, (i == cursor) ? ">" : " ");
+            text_print(5, row, codex_cat_names[i]);
+        }
+
+        text_print(2, 18, "A:Select  B:Back");
+    } else if (codex_mode == 2) {
+        /* Detail view */
+        if (codex_category == 0 && cursor < ENEMY_TYPE_COUNT) {
+            /* Enemy detail */
+            static const char* const enemy_descs[ENEMY_TYPE_COUNT] = {
+                "Stationary turret. Fires when",
+                "Walks patrol route. Chases on",
+                "Flying unit. Erratic movement.",
+                "Blocks frontal attacks. Slow.",
+                "Leaps at player. High damage.",
+                "Aggressive tracker. Fast rush.",
+                "Swarm unit. Low HP, in groups.",
+                "Fixed position. Aimed laser.",
+                "Disguised as loot drop. Ambush",
+                "Corrupts tiles to hazards.",
+                "Phases through walls. Melee.",
+                "Aerial bomber. Drops AoE.",
+            };
+            terminal_print_pal(2, 1, enemy_names[cursor], TPAL_AMBER);
+            text_print(2, 3, "HP:");
+            text_print_int(6, 3, enemy_info[cursor].hp);
+            text_print(12, 3, "ATK:");
+            text_print_int(17, 3, enemy_info[cursor].atk);
+            text_print(2, 5, "XP:");
+            text_print_int(6, 5, enemy_info[cursor].xp_reward);
+            text_print(12, 5, "Range:");
+            text_print_int(19, 5, enemy_info[cursor].detection_range);
+            text_put_char(22, 5, 'p');
+            text_put_char(23, 5, 'x');
+            /* Size */
+            text_print(2, 7, "Size:");
+            text_print_int(8, 7, enemy_info[cursor].width);
+            text_put_char(10, 7, 'x');
+            text_print_int(11, 7, enemy_info[cursor].height);
+            /* Description */
+            terminal_print_pal(2, 9, "PROFILE:", TPAL_CYAN);
+            text_print(2, 10, enemy_descs[cursor]);
+        } else if (codex_category == 1 && cursor < BOSS_TYPE_COUNT) {
+            /* Boss detail */
+            static const char* const boss_corps[BOSS_TYPE_COUNT] = {
+                "Microslop Corp", "Gogol Systems",
+                "Amazomb Inc", "Crapple Ltd",
+                "Faceplant Media", "AXIOM Failsafe",
+            };
+            static const char* const boss_descs[BOSS_TYPE_COUNT] = {
+                "Firewall barrier with pulse.",
+                "Search beam and blackout zones.",
+                "Segmented worm. Body splits.",
+                "Radial + homing shot volleys.",
+                "Vine tendrils from all walls.",
+                "Copies all previous bosses.",
+            };
+            terminal_print_pal(2, 1, boss_get_name(cursor), TPAL_RED);
+            terminal_print_pal(2, 3, boss_corps[cursor], TPAL_AMBER);
+            text_print(2, 5, "Phases: 3");
+            text_print(12, 5, "100%/60%/30%");
+            if (quest_state.boss_defeated[cursor])
+                terminal_print_pal(2, 7, "STATUS: DEFEATED", TPAL_CYAN);
+            else
+                text_print(2, 7, "STATUS: ACTIVE");
+            terminal_print_pal(2, 9, "PROFILE:", TPAL_CYAN);
+            text_print(2, 10, boss_descs[cursor]);
+        } else if (codex_category == 2 && cursor < WEAPON_TYPE_COUNT) {
+            /* Weapon detail */
+            static const char* const wep_descs[WEAPON_TYPE_COUNT] = {
+                "Standard blaster. Balanced.",
+                "Fast fire rate. Low damage.",
+                "3-way spread. Short range.",
+                "Hold to charge. High burst.",
+                "Continuous stream. Pierces.",
+                "Hold for ramping damage.",
+                "Auto-tracking projectile.",
+                "AoE burst around player.",
+            };
+            static const char* const wep_traits[WEAPON_TYPE_COUNT] = {
+                "Trait: None",
+                "Trait: +Fire Rate",
+                "Trait: Multi-hit",
+                "Trait: Charge damage x3",
+                "Trait: Pierce enemies",
+                "Trait: Ramp 1x to 2x",
+                "Trait: Auto-aim",
+                "Trait: Close-range AoE",
+            };
+            terminal_print_pal(2, 1, weapon_type_names[cursor], TPAL_AMBER);
+            terminal_print_pal(2, 3, wep_descs[cursor], TPAL_GREEN);
+            text_print(2, 5, wep_traits[cursor]);
+        }
+        text_print(2, 18, "B:Back");
+    } else if (codex_category == 0) {
+        /* Enemy entries — compact single-row with scroll */
+        terminal_print_pal(2, 1, ">> ENEMIES <<", TPAL_AMBER);
+        int scroll = cursor > 11 ? cursor - 11 : 0;
+        for (int i = scroll; i < ENEMY_TYPE_COUNT; i++) {
+            int row = 3 + (i - scroll);
+            if (row >= 17) break;
+            text_print(2, row, (i == cursor) ? ">" : " ");
+            if (codex_unlocked(CODEX_ENEMY_BASE + i)) {
+                terminal_print_pal(4, row, enemy_names[i], TPAL_GREEN);
+                text_print(16, row, "HP:");
+                text_print_int(19, row, enemy_info[i].hp);
+                text_print(23, row, "A:");
+                text_print_int(25, row, enemy_info[i].atk);
+            } else {
+                text_print(4, row, "???");
+            }
+        }
+        text_print(2, 18, "A:Detail  B:Back");
+    } else if (codex_category == 1) {
+        /* Boss entries */
+        terminal_print_pal(2, 1, ">> BOSSES <<", TPAL_AMBER);
+        for (int i = 0; i < BOSS_TYPE_COUNT; i++) {
+            int row = 3 + i * 2;
+            if (row >= 17) break;
+            text_print(2, row, (i == cursor) ? ">" : " ");
+            if (codex_unlocked(CODEX_BOSS_BASE + i)) {
+                terminal_print_pal(4, row, boss_get_name(i), TPAL_RED);
+                if (quest_state.boss_defeated[i]) {
+                    terminal_print_pal(18, row, "DEFEATED", TPAL_CYAN);
+                } else {
+                    text_print(18, row, "--------");
+                }
+            } else {
+                text_print(4, row, "???");
+            }
+        }
+        text_print(2, 18, "A:Detail  B:Back");
+    } else {
+        /* Weapon type entries */
+        terminal_print_pal(2, 1, ">> WEAPONS <<", TPAL_AMBER);
+        for (int i = 0; i < WEAPON_TYPE_COUNT; i++) {
+            int row = 3 + i * 2;
+            if (row >= 17) break;
+            text_print(2, row, (i == cursor) ? ">" : " ");
+            if (codex_unlocked(CODEX_WEAPON_BASE + i)) {
+                terminal_print_pal(4, row, weapon_type_names[i], TPAL_GREEN);
+            } else {
+                text_print(4, row, "???");
+            }
+        }
+        text_print(2, 18, "A:Detail  B:Back");
+    }
+    draw_status_bar();
+}
+
+/* ---- Evolution sub-state ---- */
+
+static void update_evolution(void) {
+    if (input_hit(KEY_DOWN) && cursor < 1) {
+        cursor = 1;
+        audio_play_sfx(SFX_MENU_SELECT);
+    }
+    if (input_hit(KEY_UP) && cursor > 0) {
+        cursor = 0;
+        audio_play_sfx(SFX_MENU_SELECT);
+    }
+    if (input_hit(KEY_A)) {
+        if (player_apply_evolution(cursor + 1)) {
+            audio_play_sfx(SFX_EVOLVE);
+            video_flash_start(4, 16);
+            hud_notify("EVOLVED!", 90);
+            sub_state = TSUB_SKILLS;
+            cursor = 0;
+            text_clear_all();
+        }
+    }
+    if (input_hit(KEY_B)) {
+        /* Allow skipping evolution (can come back later) */
+        audio_play_sfx(SFX_MENU_BACK);
+        sub_state = TSUB_MAIN;
+        cursor = 0;
+        text_clear_all();
+    }
+}
+
+static const char* const evo_names[CLASS_COUNT][2] = {
+    [CLASS_ASSAULT]      = { "VANGUARD", "COMMANDO" },
+    [CLASS_INFILTRATOR]  = { "PHANTOM",  "STRIKER" },
+    [CLASS_TECHNOMANCER] = { "ARCHITECT","HACKER" },
+};
+static const char* const evo_desc[CLASS_COUNT][2] = {
+    [CLASS_ASSAULT]      = { "HP+30% DEF+20%", "ATK+25% Crit+10%" },
+    [CLASS_INFILTRATOR]  = { "Stealth SPD+15%", "SPD+30% DblJump" },
+    [CLASS_TECHNOMANCER] = { "HP+15% DEF+15%", "ATK+20% Upload" },
+};
+
+static void draw_evolution(void) {
+    int cls = player_state.player_class % CLASS_COUNT;
+    terminal_print_pal(4, 2, "CLASS EVOLUTION", TPAL_AMBER);
+    terminal_print_pal(4, 4, "Level 20 reached!", TPAL_CYAN);
+    text_print(4, 5, "Choose your path:");
+
+    for (int c = 0; c < 2; c++) {
+        int row = 8 + c * 4;
+        if (c == cursor) {
+            terminal_print_pal(3, row, ">", TPAL_AMBER);
+        } else {
+            text_print(3, row, " ");
+        }
+        terminal_print_pal(5, row, evo_names[cls][c], TPAL_CYAN);
+        text_print(5, row + 1, evo_desc[cls][c]);
+    }
+
+    text_print(4, 17, "A:Select  B:Skip");
+    draw_status_bar();
+}
+
 void state_terminal_update(void) {
     terminal_tick();
+
+    /* Boot sequence: blocks input for 60 frames on terminal entry */
+    if (!boot_done) {
+        boot_timer++;
+        if (boot_timer >= 60) {
+            boot_done = 1;
+            text_clear_all();
+        }
+        return;
+    }
+
     switch (sub_state) {
     case TSUB_MAIN:       update_main(); break;
     case TSUB_CONTRACTS:  update_contracts(); break;
@@ -647,8 +1494,28 @@ void state_terminal_update(void) {
     case TSUB_HELP:       update_help(); break;
     case TSUB_BB_RESULTS: update_bb_results(); break;
     case TSUB_STORY:      update_story(); break;
-    case TSUB_STATS:
+    case TSUB_SKILLS:     update_skills(); break;
+    case TSUB_EVOLUTION:  update_evolution(); break;
+    case TSUB_CODEX:      update_codex(); break;
+    case TSUB_CRAFT:      update_craft(); break;
+    case TSUB_BRIEFING:
+        if (input_hit(KEY_A)) {
+            audio_play_sfx(SFX_TRANSITION);
+            game_request_state = STATE_NET;
+        }
         if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
+            sub_state = TSUB_MAIN;
+            text_clear_all();
+        }
+        break;
+    case TSUB_STATS:
+        if (input_hit(KEY_L) || input_hit(KEY_R)) {
+            stats_page ^= 1;
+            text_clear_all();
+        }
+        if (input_hit(KEY_B)) {
+            audio_play_sfx(SFX_MENU_BACK);
             sub_state = TSUB_MAIN;
             cursor = 0;
             text_clear_all();
@@ -678,12 +1545,34 @@ static void draw_status_bar(void) {
     text_print_int(7, 19, player_state.level);
     text_print(10, 19, "Cr:");
     text_print_int(13, 19, player_state.credits);
-    text_print(19, 19, "Act:");
-    text_print_int(23, 19, quest_state.current_act);
+    /* Show shards if any, otherwise show act */
+    if (player_state.craft_shards > 0) {
+        text_print(17, 19, "Sh:");
+        text_print_int(20, 19, player_state.craft_shards);
+    } else {
+        text_print(19, 19, "Act:");
+        text_print_int(23, 19, quest_state.current_act);
+    }
 }
 
 static void draw_main(void) {
     terminal_draw_menu(cursor);
+
+    /* Skill point / evolution available indicators */
+    if (player_state.skill_points > 0) {
+        static int sp_blink;
+        sp_blink++;
+        if (sp_blink & 8) {
+            terminal_print_pal(18, 4 + TMENU_SKILLS, "SP!", TPAL_CYAN);
+        }
+    }
+    if (player_state.evolution_pending && player_state.evolution == EVOLUTION_NONE) {
+        static int evo_blink;
+        evo_blink++;
+        if (evo_blink & 4) {
+            terminal_print_pal(18, 4 + TMENU_SKILLS, "EVO!", TPAL_AMBER);
+        }
+    }
 
     /* Show current story act */
     text_print(2, 13, "Act:");
@@ -796,50 +1685,106 @@ static void draw_contracts(void) {
 static void draw_stats(void) {
     static const char* const class_names[] = { "ASSAULT", "INFILTRATOR", "TECHNOMANCER" };
 
-    terminal_print_pal(2, 1, ">> OPERATOR STATS <<", TPAL_AMBER);
-    text_print(2, 3, "Class:");
-    text_print(10, 3, class_names[player_state.player_class % CLASS_COUNT]);
+    if (stats_page == 0) {
+        terminal_print_pal(2, 1, ">> OPERATOR STATS <<", TPAL_AMBER);
+        text_print(2, 3, "Class:");
+        if (player_state.evolution != EVOLUTION_NONE) {
+            terminal_print_pal(10, 3, player_get_evolution_name(), TPAL_CYAN);
+        } else {
+            text_print(10, 3, class_names[player_state.player_class % CLASS_COUNT]);
+        }
 
-    text_print(2, 5, "Level:");
-    text_print_int(10, 5, player_state.level);
+        text_print(2, 5, "Level:");
+        text_print_int(10, 5, player_state.level);
 
-    text_print(2, 7, "HP:");
-    text_print_int(7, 7, player_state.hp);
-    text_print(11, 7, "/");
-    text_print_int(12, 7, player_state.max_hp);
+        text_print(2, 7, "HP:");
+        text_print_int(7, 7, player_state.hp);
+        text_print(11, 7, "/");
+        text_print_int(12, 7, player_state.max_hp);
 
-    text_print(2, 9, "ATK:");
-    text_print_int(7, 9, player_state.atk);
-    text_print(15, 9, "DEF:");
-    text_print_int(20, 9, player_state.def);
-    text_print(2, 10, "SPD:");
-    text_print_int(7, 10, player_state.spd);
-    text_print(15, 10, "LCK:");
-    text_print_int(20, 10, player_state.lck);
+        text_print(2, 9, "ATK:");
+        text_print_int(7, 9, player_state.atk);
+        text_print(15, 9, "DEF:");
+        text_print_int(20, 9, player_state.def);
+        text_print(2, 10, "SPD:");
+        text_print_int(7, 10, player_state.spd);
+        text_print(15, 10, "LCK:");
+        text_print_int(20, 10, player_state.lck);
 
-    text_print(2, 12, "Credits:");
-    text_print_int(11, 12, player_state.credits);
+        text_print(2, 12, "Credits:");
+        text_print_int(11, 12, player_state.credits);
 
-    text_print(2, 13, "XP:");
-    text_print_int(6, 13, player_state.xp);
-    text_print(12, 13, "/");
-    text_print_int(13, 13, player_xp_to_next());
+        text_print(2, 13, "XP:");
+        text_print_int(6, 13, player_state.xp);
+        text_print(12, 13, "/");
+        text_print_int(13, 13, player_xp_to_next());
 
-    /* Story progress */
-    text_print(2, 15, "Mission:");
-    text_print_int(11, 15, quest_state.story_mission);
-    text_print(14, 15, "/20 Act:");
-    text_print_int(22, 15, quest_state.current_act);
+        /* Story progress */
+        text_print(2, 15, "Mission:");
+        text_print_int(11, 15, quest_state.story_mission);
+        text_print(14, 15, "/30 Act:");
+        text_print_int(22, 15, quest_state.current_act);
 
-    /* Bosses defeated */
-    int boss_count = 0;
-    for (int i = 0; i < 5; i++) {
-        if (quest_state.boss_defeated[i]) boss_count++;
+        /* Bosses defeated */
+        int boss_count = 0;
+        for (int i = 0; i < 6; i++) {
+            if (quest_state.boss_defeated[i]) boss_count++;
+        }
+        text_print(2, 16, "Bosses:");
+        text_print_int(10, 16, boss_count);
+        text_print(11, 16, "/6");
+    } else {
+        terminal_print_pal(2, 1, ">> COMBAT RECORD <<", TPAL_AMBER);
+
+        text_print(2, 3, "Kills:");
+        text_print_int(12, 3, game_stats.total_kills);
+        text_print(2, 4, "Deaths:");
+        text_print_int(12, 4, game_stats.total_deaths);
+        text_print(2, 5, "Dmg Dealt:");
+        text_print_int(14, 5, game_stats.damage_dealt);
+        text_print(2, 6, "Dmg Taken:");
+        text_print_int(14, 6, game_stats.damage_taken);
+        text_print(2, 7, "Best Combo:");
+        text_print_int(14, 7, game_stats.highest_combo);
+        text_print(2, 8, "Items Found:");
+        text_print_int(16, 8, game_stats.items_found);
+        text_print(2, 9, "Items Crafted:");
+        text_print_int(17, 9, game_stats.items_crafted);
+        text_print(2, 10, "Contracts:");
+        text_print_int(13, 10, game_stats.contracts_done);
+
+        /* Play time (convert frames to HH:MM) */
+        u32 total_secs = game_stats.play_time_frames / 60;
+        int hours = (int)(total_secs / 3600);
+        int mins = (int)((total_secs % 3600) / 60);
+        text_print(2, 12, "Play Time:");
+        text_print_int(14, 12, hours);
+        text_put_char(14 + (hours >= 10 ? 2 : 1), 12, 'h');
+        text_print_int(14 + (hours >= 10 ? 3 : 2), 12, mins);
+        text_put_char(14 + (hours >= 10 ? 3 : 2) + (mins >= 10 ? 2 : 1), 12, 'm');
+
+        if (game_stats.ng_plus) {
+            terminal_print_pal(2, 14, "NG+ Active", TPAL_CYAN);
+        }
+        if (game_stats.bb_threat_level > 0) {
+            text_print(2, 15, "Threat Lv:");
+            text_print_int(13, 15, game_stats.bb_threat_level);
+        }
+        /* Achievement count */
+        {
+            int ach_count = 0;
+            for (int i = 0; i < ACH_COUNT; i++) {
+                if (ach_unlocked(i)) ach_count++;
+            }
+            text_print(2, 16, "Achievements:");
+            text_print_int(16, 16, ach_count);
+            text_print(18, 16, "/");
+            text_print_int(19, 16, ACH_COUNT);
+        }
     }
-    text_print(2, 16, "Bosses:");
-    text_print_int(10, 16, boss_count);
-    text_print(11, 16, "/5");
 
+    text_print(2, 17, "L/R:Page");
+    text_print(14, 17, stats_page == 0 ? "[1/2]" : "[2/2]");
     text_print(2, 18, "B:Back");
     draw_status_bar();
 }
@@ -950,17 +1895,21 @@ static void draw_save(void) {
                 text_print_int(9, row + 1, sd.quest_act);
                 text_print(12, row + 1, "Cr:");
                 text_print_int(15, row + 1, sd.credits);
+            } else {
+                terminal_print_pal(12, row, "CORRUPTED", TPAL_RED);
             }
         } else {
             text_print(12, row, "- Empty -");
         }
     }
 
-    if (save_msg_timer > 0) {
+    if (save_confirm) {
+        terminal_print_pal(4, 16, "Overwrite slot? A:Yes B:No", TPAL_RED);
+    } else if (save_msg_timer > 0) {
         text_print(10, 16, "Done!");
     }
 
-    text_print(2, 18, "A:Save R:Load B:Back");
+    text_print(2, 18, save_confirm ? "A:Confirm      B:Cancel" : "A:Save R:Load B:Back");
     draw_status_bar();
 }
 
@@ -992,18 +1941,41 @@ static void draw_bugbounty(void) {
         }
     }
 
-    /* Selected tier detail */
-    if (bugbounty_tier_available(cursor)) {
+    /* Total runs */
+    text_print(2, 16, "Runs:");
+    text_print_int(8, 16, bb_state.total_runs);
+
+    /* Endgame stats (post-story) */
+    if (game_stats.endgame_unlocked) {
+        text_clear_rect(2, 14, 26, 1);
+        text_print(2, 14, "EC:");
+        text_print_int(5, 14, game_stats.bb_endgame_contracts);
+        /* Boss contract countdown */
+        {
+            int next_boss = 25 - ((int)game_stats.bb_endgame_contracts % 25);
+            if (next_boss == 25) next_boss = 0;
+            text_print(13, 14, "BOSS:");
+            text_print_int(18, 14, next_boss);
+        }
+        text_clear_rect(2, 15, 26, 1);
+        /* Threat level as stars */
+        text_print(2, 15, "THREAT:");
+        {
+            int tl = game_stats.bb_threat_level;
+            if (tl > 10) tl = 10;
+            for (int i = 0; i < tl && i < 10; i++)
+                text_put_char(10 + i, 15, '*');
+        }
+        /* Highest level reached */
+        text_print(21, 15, "Lv");
+        text_print_int(23, 15, game_stats.bb_highest_level);
+    } else if (bugbounty_tier_available(cursor)) {
         int rfloor = bugbounty_get_rarity_floor(cursor);
         text_print(2, 15, "Scale:");
         text_print(9, 15, scale_str[cursor]);
         text_print(15, 15, "Drop:");
         text_print(21, 15, loot_get_rarity_name(rfloor));
     }
-
-    /* Total runs */
-    text_print(2, 16, "Runs:");
-    text_print_int(8, 16, bb_state.total_runs);
 
     text_print(2, 18, "A:Start  B:Back");
     draw_status_bar();
@@ -1071,33 +2043,37 @@ static void draw_help(void) {
         terminal_print_pal(2, 1, "-- Abilities & Classes --", TPAL_AMBER);
         text_print(2, r++, "L:Cycle  R:Use  Unlock=Level");
         r++;
-        text_print(2, r++, "ASSAULT (tank & punish)");
-        text_print(2, r++, " L3:Charged Shot");
-        text_print(2, r++, " L7:Burst  L12:Heavy Shell");
-        text_print(2, r++, " L17:Overclock (2x rate)");
-        text_print(2, r++, "INFILTRATOR (speed)");
-        text_print(2, r++, " L3:Air Dash  L7:Phase Shot");
-        text_print(2, r++, " L12:Fan Fire  L17:Overload");
-        text_print(2, r++, "TECHNOMANCER (control)");
-        text_print(2, r++, " L3:Turret    L7:Scan Pulse");
-        text_print(2, r++, " L12:Data Shield (half dmg)");
-        text_print(2, r++, " L17:Sys Crash (stun all)");
+        terminal_print_pal(2, r++, "ASSAULT", TPAL_RED);
+        text_print(2, r++, "ChrgShot Burst HvyShell Overcl");
+        text_print(2, r++, "Rocket IronSkin WarCry Berserk");
+        r++;
+        terminal_print_pal(2, r++, "INFILTRATOR", TPAL_CYAN);
+        text_print(2, r++, "AirDash PhaseShot FanFire Ovld");
+        text_print(2, r++, "Smoke Backstab Clone TimeWarp");
+        r++;
+        terminal_print_pal(2, r++, "TECHNOMANCER", TPAL_AMBER);
+        text_print(2, r++, "Turret Scan DShield SysCrash");
+        text_print(2, r++, "Nanobots Firewall OC+ Upload");
+        r++;
+        text_print(2, r++, "Evolve at Lv20 (2 choices)");
+        text_print(2, r++, "Skill tree: 1 SP per 2 levels");
         break;
     case 3: /* Loot & Equipment */
         terminal_print_pal(2, 1, "-- Loot & Equipment --", TPAL_AMBER);
-        text_print(2, r++, "Rarity tiers:");
-        terminal_print_pal(2, r++, "Common < Uncommon < Rare", TPAL_GREEN);
-        terminal_print_pal(2, r++, "Epic < Legendary", TPAL_AMBER);
+        text_print(2, r++, "Rarity: Common<Unco<Rare<Epic");
+        terminal_print_pal(2, r++, "Legendary < Mythic (boss)", TPAL_AMBER);
         r++;
-        text_print(2, r++, "Open INVENTORY at terminal");
-        text_print(2, r++, "A:Equip weapon");
-        text_print(2, r++, "R:Sell for credits");
+        text_print(2, r++, "3 slots: Weapon+Armor+Acces");
+        text_print(2, r++, "A:Equip  R:Sell");
         r++;
-        text_print(2, r++, "DMG=base damage per shot");
-        text_print(2, r++, "SPD=fire rate (lower=faster)");
+        text_print(2, r++, "8 weapon types:");
+        text_print(2, r++, "Buster Rapid Spread Charger");
+        text_print(2, r++, "Beam Laser Homing Nova(AoE)");
         r++;
-        text_print(2, r++, "Inventory: 20 item capacity");
-        text_print(2, r++, "All enemies can drop loot");
+        text_print(2, r++, "CRAFT menu at terminal:");
+        text_print(2, r++, "Fuse 3 same rarity -> upgrade");
+        text_print(2, r++, "Salvage item -> shards");
+        text_print(2, r++, "Forge = reroll stats (shards)");
         break;
     case 4: /* Contracts & Missions */
         terminal_print_pal(2, 1, "-- Contracts & Missions --", TPAL_AMBER);
@@ -1115,20 +2091,19 @@ static void draw_help(void) {
         break;
     case 5: /* Bosses & Story */
         terminal_print_pal(2, 1, "-- Bosses & Story --", TPAL_AMBER);
-        text_print(2, r++, "5 acts, 4 missions each");
-        text_print(2, r++, "Boss on mission 4,8,12,16,20");
+        text_print(2, r++, "6 acts, 5 missions each (30)");
+        text_print(2, r++, "Boss on mission 5,10,15,20,25");
         r++;
-        text_print(2, r++, "Boss phases:");
-        text_print(2, r++, "ATTACK: learn the pattern");
-        text_print(2, r++, "VULNERABLE: max damage!");
-        text_print(2, r++, "Boss flashing = hit it NOW!");
+        text_print(2, r++, "3-phase bosses (100/60/30%HP)");
+        text_print(2, r++, "P1:Learn  P2:Harder  P3:Chaos");
+        text_print(2, r++, "VULNERABLE: flashing=HIT NOW");
         r++;
-        text_print(2, r++, "Bosses enrage at <50% HP");
+        text_print(2, r++, "6 corps: Microslop Gogol");
+        text_print(2, r++, "Amazomb Crapple Faceplant");
+        text_print(2, r++, "Act 6: DAEMON (final boss)");
         r++;
-        text_print(2, r++, "Level gates:");
-        text_print(2, r++, "Act2:Lv7    Act3:Lv15");
-        text_print(2, r++, "Act4:Lv23   Act5:Lv27");
-        text_print(2, r++, "Final boss: Lv30");
+        text_print(2, r++, "After story: NG+ or Endgame");
+        text_print(2, r++, "Endgame: endless Bug Bounty");
         break;
     case 6: /* Shop & Credits */
         terminal_print_pal(2, 1, "-- Shop & Credits --", TPAL_AMBER);
@@ -1225,6 +2200,24 @@ static void draw_bb_results(void) {
 }
 
 void state_terminal_draw(void) {
+    terminal_scroll_bg();
+
+    /* Update fade-in transition (must run every frame, even during boot) */
+    video_transition_update();
+
+    /* Boot sequence display — line-by-line terminal messages */
+    if (!boot_done) {
+        int t = boot_timer;
+        if (t >= 2)  terminal_print_pal(2, 3, "> INIT NEURAL LINK...", TPAL_GREEN);
+        if (t >= 10) terminal_print_pal(2, 4, "> HANDSHAKE OK", TPAL_GREEN);
+        if (t >= 18) terminal_print_pal(2, 5, "> ENCRYPTING CHANNEL", TPAL_GREEN);
+        if (t >= 26) terminal_print_pal(2, 6, "> TRACE COUNTERMEASURES: ON", TPAL_GREEN);
+        if (t >= 34) terminal_print_pal(2, 8, "> CONNECTING...", TPAL_CYAN);
+        if (t >= 44) terminal_print_pal(2, 10, "> LINK ESTABLISHED", TPAL_AMBER);
+        if (t >= 52) terminal_print_pal(4, 12, "WELCOME, OPERATOR", TPAL_AMBER);
+        return;
+    }
+
     switch (sub_state) {
     case TSUB_MAIN:
         draw_main();
@@ -1256,6 +2249,79 @@ void state_terminal_draw(void) {
     case TSUB_STORY:
         draw_story();
         break;
+    case TSUB_SKILLS:
+        draw_skills();
+        break;
+    case TSUB_EVOLUTION:
+        draw_evolution();
+        break;
+    case TSUB_CODEX:
+        draw_codex();
+        break;
+    case TSUB_CRAFT:
+        draw_craft();
+        break;
+    case TSUB_BRIEFING:
+    {
+        Contract* bc = quest_get_active();
+        terminal_print_pal(2, 1, "== MISSION BRIEFING ==", TPAL_AMBER);
+        if (bc) {
+            /* Mission name / story mission info */
+            if (bc->story_mission > 0) {
+                terminal_print_pal(2, 3, "STORY MISSION", TPAL_CYAN);
+                text_print(2, 4, "Act:");
+                text_print_int(7, 4, (int)quest_state.current_act);
+                text_print(10, 4, "Mission:");
+                text_print_int(19, 4, bc->story_mission);
+            } else {
+                terminal_print_pal(2, 3, "CONTRACT", TPAL_CYAN);
+            }
+            /* Objective type */
+            text_print(2, 6, "OBJ:");
+            static const char* const obj_names[] = {
+                "KILL ALL", "SURVIVE", "BOSS HUNT",
+                "RETRIEVAL", "ESCAPE", "STORY"
+            };
+            int ot = bc->type;
+            if (ot >= 0 && ot < 6) text_print(7, 6, obj_names[ot]);
+            /* Kill target if applicable */
+            if (bc->kill_target > 0) {
+                text_print(2, 7, "Target:");
+                text_print_int(10, 7, bc->kill_target);
+                text_print(14, 7, "kills");
+            }
+            /* Threat level (stars) */
+            text_print(2, 9, "THREAT:");
+            {
+                int stars = bc->tier;
+                if (stars > 10) stars = 10;
+                for (int s = 0; s < stars && s < 10; s++)
+                    text_put_char(10 + s, 9, '*');
+            }
+            /* Rewards */
+            terminal_print_pal(2, 11, "REWARDS:", TPAL_AMBER);
+            text_print(2, 12, "Credits:");
+            text_print_int(11, 12, (int)bc->reward_credits);
+            text_print(2, 13, "XP:");
+            {
+                int xp = 30 + bc->tier * 15;
+                if (bc->story_mission > 0) xp += bc->story_mission * 10;
+                text_print_int(6, 13, xp);
+            }
+            /* Brief text */
+            {
+                const char* brief = quest_get_story_brief(bc->story_mission);
+                if (brief) {
+                    terminal_print_pal(2, 15, brief, TPAL_GREEN);
+                }
+            }
+        } else {
+            text_print(2, 5, "No active contract.");
+        }
+        /* Controls */
+        terminal_print_pal(2, 18, "[A]:JACK IN  [B]:CANCEL", TPAL_GREEN);
+        break;
+    }
     }
 }
 

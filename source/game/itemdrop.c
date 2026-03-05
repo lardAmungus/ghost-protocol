@@ -5,11 +5,15 @@
  */
 #include "game/itemdrop.h"
 #include "game/common.h"
+#include "game/loot.h"
+#include "game/player.h"
 #include "engine/entity.h"
+#include "engine/video.h"
 #include "game/hud.h"
 #include "engine/sprite.h"
 #include "engine/audio.h"
 #include "engine/rng.h"
+#include "game/particle.h"
 
 typedef struct {
     s32 x, y;       /* World position (8.8) */
@@ -26,18 +30,18 @@ static DropEntity drops[MAX_DROPS];
 /* Item drop sprite tiles: 3 variants */
 /* Tile 0: Gem (faceted, consumables/common) */
 static const u32 spr_drop_gem[8] = {
-    0x00044000, 0x00476400, 0x04677640, 0x46777764,
-    0x04677640, 0x00476400, 0x00044000, 0x00000000,
+    0x000D4D00, 0x00D76400, 0x0D677640, 0x46777764,
+    0x0D677F40, 0x00D76400, 0x000D4D00, 0x00000000,
 };
-/* Tile 1: Chip (data chip, gear drops) */
+/* Tile 1: Chip (circuit board data chip, gear drops) */
 static const u32 spr_drop_chip[8] = {
-    0x00000000, 0x04444440, 0x46777640, 0x47676740,
-    0x47676740, 0x46777640, 0x04444440, 0x00000000,
+    0x00000000, 0x0D44444D, 0x46797640, 0x47676740,
+    0x47C7C740, 0x46797640, 0x0D44444D, 0x00000000,
 };
-/* Tile 2: Orb (energy sphere, rare+) */
+/* Tile 2: Orb (pulsing energy sphere with corona, rare+) */
 static const u32 spr_drop_orb[8] = {
-    0x00044000, 0x00477400, 0x04777740, 0x47F77F74,
-    0x47777F74, 0x04777740, 0x00477400, 0x00044000,
+    0x00D44D00, 0x0D477400, 0xD4F77F40, 0x47F7FF74,
+    0x47FF7F74, 0xD4F77F40, 0x0D477400, 0x00D44D00,
 };
 
 /* Drop palette — full 16 colors with rarity + material ramps */
@@ -60,8 +64,8 @@ static const u16 pal_drop[16] = {
     RGB15_C(31, 31, 28),  /* F: warm white */
 };
 
-/* Drop tiles at OBJ tile 180 (after 4 projectile tiles at 176-179) */
-#define DROP_TILE_BASE 180
+/* Drop tiles at OBJ tile 290 (after 18 projectile tiles at 272-289) */
+#define DROP_TILE_BASE 290
 #define DROP_PAL_BANK  8
 static int gfx_loaded;
 
@@ -120,8 +124,14 @@ void itemdrop_roll(s32 x, s32 y, int tier, int rarity_floor, int player_lck) {
     int roll = (int)rand_range(100);
     if (roll >= 20) return;
 
+    /* Endgame: boost tier based on player level for scaling loot */
+    if (game_stats.endgame_unlocked) {
+        int plvl_tier = (int)player_state.level / 3;
+        if (plvl_tier > tier) tier = plvl_tier;
+    }
+
     LootItem item;
-    loot_generate(&item, tier, rarity_floor, player_lck);
+    loot_generate_any(&item, tier, rarity_floor, player_lck);
     itemdrop_spawn(x, y, &item);
 }
 
@@ -199,7 +209,45 @@ int itemdrop_check_pickup(s32 player_x, s32 player_y) {
             /* Pickup! */
             if (inventory_add(&drops[i].item)) {
                 audio_play_sfx(SFX_PICKUP);
-                hud_notify("ITEM GET!", 30);
+                /* Rarity-specific notification and celebration */
+                {
+                    int rarity = drops[i].item.rarity;
+                    if (rarity >= RARITY_COUNT) rarity = RARITY_COUNT - 1;
+                    static const char* rarity_msg[] = {
+                        "Item get", "UNCOMMON!", "RARE FIND!",
+                        "EPIC DROP!", "LEGENDARY!", "MYTHIC!!!"
+                    };
+                    int dur = 30 + rarity * 15; /* Longer for rarer items */
+                    hud_notify(rarity_msg[rarity], dur);
+                    if (rarity >= RARITY_LEGENDARY) {
+                        video_shake(2, 1);
+                        ach_unlock_celebrate(ACH_LEGENDARY_FIND);
+                    }
+                    if (rarity >= RARITY_MYTHIC) {
+                        ach_unlock_celebrate(ACH_MYTHIC_FIND);
+                    }
+                    /* Track items found stat */
+                    if (game_stats.items_found < 65535) game_stats.items_found++;
+                    if (game_stats.items_found >= 50) ach_unlock_celebrate(ACH_LOOTER);
+                    /* Codex: unlock weapon type on first find */
+                    if (LOOT_CATEGORY(drops[i].item.type) == LOOT_CAT_WEAPON) {
+                        codex_unlock(CODEX_WEAPON_BASE + LOOT_SUBTYPE(drops[i].item.type));
+                    }
+                }
+                /* Check if pickup is an upgrade over equipped item (only for common/uncommon) */
+                if (drops[i].item.rarity < RARITY_RARE) {
+                    int cat = LOOT_CATEGORY(drops[i].item.type);
+                    LootItem* eq = NULL;
+                    if (cat == LOOT_CAT_WEAPON) eq = inventory_get_equipped();
+                    else if (cat == LOOT_CAT_ARMOR) eq = inventory_get_equipped_armor();
+                    else if (cat == LOOT_CAT_ACCESSORY) eq = inventory_get_equipped_accessory();
+                    if (eq && loot_compare(&drops[i].item, eq) > 0) {
+                        hud_notify("UPGRADE FOUND!", 60);
+                    }
+                }
+                /* Pickup sparkle burst — more particles for rarer items */
+                particle_burst(drops[i].x, drops[i].y,
+                               4 + drops[i].item.rarity, PART_STAR, 160, 16);
 
                 /* Free OAM and deactivate */
                 if (drops[i].oam_index != OAM_NONE) {

@@ -46,11 +46,14 @@ static const char* const class_playstyle[CLASS_COUNT] = {
     "SPEED & EVASION",
     "CONTROL & SUPPORT"
 };
-/* Ability names per class (4 abilities, unlocked at Lv 3/7/12/17) */
-static const char* const class_abilities[CLASS_COUNT][4] = {
-    { "Charged Shot", "Burst Fire",   "Heavy Shell",  "Overclock"    },
-    { "Air Dash",     "Phase Shot",   "Fan Fire",     "Overload"     },
-    { "Turret Deploy","Scan Pulse",   "Data Shield",  "Sys Crash"    },
+/* Ability names per class (8 abilities) */
+static const char* const class_abilities[CLASS_COUNT][8] = {
+    { "Charged Shot", "Burst Fire",  "Heavy Shell", "Overclock",
+      "Rocket",       "Iron Skin",   "War Cry",     "Berserk"     },
+    { "Air Dash",     "Phase Shot",  "Fan Fire",    "Overload",
+      "Smoke Bomb",   "Backstab",    "Clone",       "Time Warp"   },
+    { "Turret",       "Scan Pulse",  "Data Shield", "Sys Crash",
+      "Nanobots",     "Firewall",    "Overclock+",  "Upload"      },
 };
 /* Level 1 base stats: HP, ATK, DEF, SPD, LCK */
 static const int class_stats[CLASS_COUNT][5] = {
@@ -63,6 +66,10 @@ static int selected_class;
 static int cursor;          /* 0 = class select, 1..3 = load slot 1-3 */
 static int any_save;        /* non-zero if at least one slot has data  */
 static int blink_timer;
+static int fade_timer;
+static int fade_target;
+static int fade_in_timer;
+#define FADE_FRAMES 15
 
 /* ---- Helpers ---- */
 
@@ -105,36 +112,70 @@ static void draw_class_page(int cls) {
 
     draw_bar(7);
 
-    /* Base stats */
-    text_print(SEL_COL, 8, "HP:");
-    text_print_int(SEL_COL + 3, 8, class_stats[cls][0]);
+    /* Base stats with visual bars — 2 rows of layout */
+    /* Max reference values for bar scaling */
+    {
+        /* Row 8: HP bar (full width since HP range is large) */
+        text_print(SEL_COL, 8, "HP");
+        {
+            int val = class_stats[cls][0];
+            int filled = val * 8 / 40; /* scale to 8 chars */
+            if (filled > 8) filled = 8;
+            text_put_char(SEL_COL + 3, 8, '[');
+            for (int b = 0; b < 8; b++)
+                text_put_char(SEL_COL + 4 + b, 8, (b < filled) ? '=' : '-');
+            text_put_char(SEL_COL + 12, 8, ']');
+            text_print_int(SEL_COL + 14, 8, val);
+        }
 
-    text_print(SEL_COL + 8, 8, "ATK:");
-    text_print_int(SEL_COL + 12, 8, class_stats[cls][1]);
+        /* Row 9: ATK and DEF side by side */
+        static const char* lab2[] = { "ATK", "DEF" };
+        static const int max2[] = { 10, 7 };
+        for (int s = 0; s < 2; s++) {
+            int col_base = SEL_COL + s * 14;
+            int val = class_stats[cls][1 + s];
+            int filled = val * 5 / max2[s];
+            if (filled > 5) filled = 5;
+            text_print(col_base, 9, lab2[s]);
+            text_put_char(col_base + 4, 9, '[');
+            for (int b = 0; b < 5; b++)
+                text_put_char(col_base + 5 + b, 9, (b < filled) ? '=' : '-');
+            text_put_char(col_base + 10, 9, ']');
+            text_print_int(col_base + 11, 9, val);
+        }
 
-    text_print(SEL_COL + 17, 8, "DEF:");
-    text_print_int(SEL_COL + 21, 8, class_stats[cls][2]);
+        /* Row 10: SPD and LCK side by side */
+        static const char* lab3[] = { "SPD", "LCK" };
+        static const int max3[] = { 8, 5 };
+        for (int s = 0; s < 2; s++) {
+            int col_base = SEL_COL + s * 14;
+            int val = class_stats[cls][3 + s];
+            int filled = val * 5 / max3[s];
+            if (filled > 5) filled = 5;
+            text_print(col_base, 10, lab3[s]);
+            text_put_char(col_base + 4, 10, '[');
+            for (int b = 0; b < 5; b++)
+                text_put_char(col_base + 5 + b, 10, (b < filled) ? '=' : '-');
+            text_put_char(col_base + 10, 10, ']');
+            text_print_int(col_base + 11, 10, val);
+        }
+    }
 
-    text_print(SEL_COL, 9, "SPD:");
-    text_print_int(SEL_COL + 4, 9, class_stats[cls][3]);
+    draw_bar(11);
 
-    text_print(SEL_COL + 8, 9, "LCK:");
-    text_print_int(SEL_COL + 12, 9, class_stats[cls][4]);
-
-    draw_bar(10);
-
-    /* Abilities */
-    text_print(SEL_COL, 11, "ABILITIES:");
-    text_print(SEL_COL, 12, "[1]");
-    text_print(SEL_COL + 4, 12, class_abilities[cls][0]);
-    text_print(SEL_COL, 13, "[2]");
-    text_print(SEL_COL + 4, 13, class_abilities[cls][1]);
-    text_print(SEL_COL, 14, "[3]");
-    text_print(SEL_COL + 4, 14, class_abilities[cls][2]);
-    text_print(SEL_COL, 15, "[4]");
-    text_print(SEL_COL + 4, 15, class_abilities[cls][3]);
-
-    draw_bar(16);
+    /* Abilities — 8 in 2 columns x 4 rows */
+    text_print(SEL_COL, 12, "ABILITIES:");
+    for (int a = 0; a < 4; a++) {
+        int row = 13 + a;
+        /* Left column: abilities 1-4 */
+        text_put_char(SEL_COL, row, (char)('1' + a));
+        text_put_char(SEL_COL + 1, row, ':');
+        text_print(SEL_COL + 2, row, class_abilities[cls][a]);
+        /* Right column: abilities 5-8 */
+        text_put_char(SEL_COL + 14, row, (char)('5' + a));
+        text_put_char(SEL_COL + 15, row, ':');
+        text_print(SEL_COL + 16, row, class_abilities[cls][4 + a]);
+    }
 
     /* Playstyle */
     text_print(SEL_COL, 17, "STYLE:");
@@ -177,6 +218,11 @@ void state_charsel_enter(void) {
     selected_class = 0;
     cursor = 0;
     blink_timer = 0;
+    fade_timer = 0;
+    fade_target = 0;
+    fade_in_timer = FADE_FRAMES;
+    REG_BLDCNT = BLD_BLACK | BLD_ALL;
+    REG_BLDY = 16;
 
     /* Check for any existing saves */
     any_save = 0;
@@ -196,6 +242,26 @@ void state_charsel_enter(void) {
 
 void state_charsel_update(void) {
     blink_timer++;
+
+    /* Fade-out → state transition */
+    if (fade_timer > 0) {
+        fade_timer--;
+        REG_BLDY = (u16)(16 - (fade_timer * 16 / FADE_FRAMES));
+        if (fade_timer == 0) {
+            game_request_state = fade_target;
+        }
+        return;
+    }
+
+    /* Fade-in */
+    if (fade_in_timer > 0) {
+        fade_in_timer--;
+        REG_BLDY = (u16)(fade_in_timer * 16 / FADE_FRAMES);
+        if (fade_in_timer == 0) {
+            REG_BLDCNT = 0;
+            REG_BLDY = 0;
+        }
+    }
 
     if (cursor == 0) {
         /* Class selection mode */
@@ -223,11 +289,15 @@ void state_charsel_update(void) {
             /* Confirm class selection — new game */
             player_state.player_class = (u8)selected_class;
             audio_play_sfx(SFX_MENU_SELECT);
-            game_request_state = STATE_TERMINAL;
+            fade_timer = FADE_FRAMES;
+            fade_target = STATE_TERMINAL;
+            REG_BLDCNT = BLD_BLACK | BLD_ALL;
         }
         if (input_hit(KEY_B)) {
             audio_play_sfx(SFX_MENU_BACK);
-            game_request_state = STATE_TITLE;
+            fade_timer = FADE_FRAMES;
+            fade_target = STATE_TITLE;
+            REG_BLDCNT = BLD_BLACK | BLD_ALL;
         }
     } else {
         /* Save-slot browse mode: cursor 1-3 = save slots 0-2 */
@@ -260,7 +330,9 @@ void state_charsel_update(void) {
                 player_state.ability_unlocks = sd.ability_unlocks;
                 /* Quest state restored in state_terminal_enter */
                 audio_play_sfx(SFX_MENU_SELECT);
-                game_request_state = STATE_TERMINAL;
+                fade_timer = FADE_FRAMES;
+                fade_target = STATE_TERMINAL;
+                REG_BLDCNT = BLD_BLACK | BLD_ALL;
             } else {
                 /* Slot empty — bounce back */
                 cursor = 0;

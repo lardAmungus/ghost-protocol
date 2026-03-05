@@ -11,6 +11,9 @@ static const char* const menu_labels[TMENU_COUNT] = {
     "SHOP",
     "INVENTORY",
     "STATS",
+    "SKILLS",
+    "CODEX",
+    "CRAFT",
     "JACK IN",
     "SAVE/LOAD",
     "HELP/TIPS",
@@ -43,9 +46,9 @@ void terminal_draw_menu(int cursor) {
     for (int i = 0; i < TMENU_COUNT; i++) {
         int row = 4 + i;
         if (i == cursor) {
-            /* Blinking cursor: alternate ">" and "_" every 16 frames */
-            if ((frame_counter >> 4) & 1) {
-                text_print(3, row, "_");
+            /* Blinking cursor: visible 12 frames, hidden 4 frames (16-frame cycle) */
+            if ((frame_counter & 15) >= 12) {
+                text_print(3, row, " ");
             } else {
                 text_print(3, row, ">");
             }
@@ -128,4 +131,68 @@ int terminal_get_frame(void) {
 
 void terminal_tick(void) {
     frame_counter++;
+}
+
+/* ---- Animated circuit board background on BG1 ---- */
+
+/* 6 simple 8x8 4bpp circuit tiles loaded into CBB1 */
+static const u32 circuit_tiles[6][8] = {
+    /* 0: dark fill (nearly empty) */
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+      0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    /* 1: horizontal trace */
+    { 0x00000000, 0x00000000, 0x00000000, 0x11111111,
+      0x11111111, 0x00000000, 0x00000000, 0x00000000 },
+    /* 2: vertical trace */
+    { 0x00010000, 0x00010000, 0x00010000, 0x00010000,
+      0x00010000, 0x00010000, 0x00010000, 0x00010000 },
+    /* 3: node (junction dot) */
+    { 0x00000000, 0x00000000, 0x00111000, 0x00111000,
+      0x00111000, 0x00000000, 0x00000000, 0x00000000 },
+    /* 4: corner (L-shape) */
+    { 0x00010000, 0x00010000, 0x00010000, 0x00011111,
+      0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    /* 5: cross */
+    { 0x00010000, 0x00010000, 0x00010000, 0x11111111,
+      0x00010000, 0x00010000, 0x00010000, 0x00010000 },
+};
+
+void terminal_load_bg(void) {
+    /* Load circuit tiles into CBB1 (tile_mem[1]) */
+    for (int t = 0; t < 6; t++) {
+        memcpy(&tile_mem[1][t], circuit_tiles[t], 32);
+    }
+
+    /* Set up BG1 palette (bank 4): dark BG + dim green traces */
+    pal_bg_mem[4 * 16 + 0] = RGB15(0, 0, 1);
+    pal_bg_mem[4 * 16 + 1] = RGB15(1, 8, 2);
+
+    /* Fill SBB28 with circuit pattern */
+    u16* sbb = (u16*)se_mem[28];
+    u16 pal_bits = (4 << 12); /* palette bank 4 */
+    for (int row = 0; row < 32; row++) {
+        for (int col = 0; col < 32; col++) {
+            int tile;
+            /* Create a repeating circuit board pattern */
+            int px = col % 8;
+            int py = row % 8;
+            if (px == 0 && py == 0) tile = 5;       /* cross at grid intersections */
+            else if (px == 4 && py == 4) tile = 3;   /* node at midpoints */
+            else if (py == 0) tile = 1;               /* horizontal trace on grid rows */
+            else if (px == 0) tile = 2;               /* vertical trace on grid cols */
+            else if (px == 4 && py < 4) tile = 2;    /* short vertical segment */
+            else if (py == 4 && px < 4) tile = 1;    /* short horizontal segment */
+            else tile = 0;                             /* dark fill */
+            sbb[row * 32 + col] = (u16)(tile | pal_bits);
+        }
+    }
+
+    /* Configure BG1: CBB1, SBB28, priority 3 (behind text) */
+    REG_BG1CNT = BG_CBB(1) | BG_SBB(28) | BG_4BPP | BG_REG_32x32 | BG_PRIO(3);
+}
+
+void terminal_scroll_bg(void) {
+    /* Slow diagonal scroll — 1px every 2 frames horizontal, 1px every 4 frames vertical */
+    REG_BG1HOFS = (u16)(frame_counter >> 1);
+    REG_BG1VOFS = (u16)(frame_counter >> 2);
 }

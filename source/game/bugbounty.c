@@ -131,6 +131,28 @@ void bugbounty_complete(void) {
     /* Track total runs */
     if (bb_state.total_runs < 255) bb_state.total_runs++;
 
+    /* Track endgame contracts and achievements */
+    if (game_stats.endgame_unlocked) {
+        if (game_stats.bb_endgame_contracts < 0xFFFF) {
+            game_stats.bb_endgame_contracts++;
+        }
+        if (game_stats.bb_endgame_contracts >= 25) {
+            ach_unlock_celebrate(ACH_BOUNTY_HUNTER_25);
+        }
+        /* Threat level increases every 100 contracts */
+        if (game_stats.bb_endgame_contracts % 100 == 0 && game_stats.bb_threat_level < 255) {
+            game_stats.bb_threat_level++;
+            if (game_stats.bb_threat_level >= 5) {
+                ach_unlock_celebrate(ACH_THREAT_LEVEL_5);
+            }
+        }
+    }
+
+    /* Bug hunter: all 5 tiers unlocked */
+    if (bb_state.highest_unlocked >= BB_TIER_COUNT - 1) {
+        ach_unlock_celebrate(ACH_BUG_HUNTER);
+    }
+
     bb_state.run_complete = 1;
     bb_state.active = 0;
 }

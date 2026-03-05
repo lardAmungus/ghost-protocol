@@ -16,6 +16,9 @@ enum {
     TMENU_SHOP,
     TMENU_INVENTORY,
     TMENU_STATS,
+    TMENU_SKILLS,
+    TMENU_CODEX,
+    TMENU_CRAFT,
     TMENU_JACK_IN,
     TMENU_SAVE,
     TMENU_HELP,
@@ -53,5 +56,11 @@ int terminal_get_frame(void);
 
 /* Increment terminal frame counter. Call once per frame. */
 void terminal_tick(void);
+
+/* Load animated circuit board BG on BG1. Call in terminal_enter. */
+void terminal_load_bg(void);
+
+/* Update BG1 scroll for animated circuit board effect. Call each frame. */
+void terminal_scroll_bg(void);
 
 #endif /* GAME_TERMINAL_H */

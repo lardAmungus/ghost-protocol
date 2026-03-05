@@ -11,11 +11,14 @@
 #include "engine/entity.h"
 #include "engine/collision.h"
 #include "engine/audio.h"
+#include "engine/video.h"
 #include "engine/rng.h"
 #include "game/itemdrop.h"
 #include "game/player.h"
 #include "game/bugbounty.h"
 #include "game/hud.h"
+#include "game/particle.h"
+#include "game/quest.h"
 
 /* Enemy info table (base stats, scaled by tier at spawn) */
 const EnemyInfo enemy_info[ENEMY_TYPE_COUNT] = {
@@ -31,6 +34,18 @@ const EnemyInfo enemy_info[ENEMY_TYPE_COUNT] = {
     { 4, 6, 8, 16, 4, 0 },
     /* HUNTER:  moderate HP, aggressive */
     { 8, 5, 14, 14, 12, 112 },
+    /* DRONE:   very low HP, fast swarm */
+    { 3, 2, 8, 8, 3, 80 },
+    /* TURRET:  high ATK, stationary aimed */
+    { 6, 8, 12, 12, 7, 128 },
+    /* MIMIC:   medium HP, disguised */
+    { 10, 6, 14, 14, 10, 16 },
+    /* CORRUPTOR: ranged, corruption shots */
+    { 8, 4, 12, 12, 8, 96 },
+    /* GHOST:   low HP, phases through walls */
+    { 5, 4, 12, 12, 6, 80 },
+    /* BOMBER:  medium HP, aerial bombs */
+    { 7, 5, 12, 12, 8, 96 },
 };
 
 /* Per-enemy AI state (indexed by entity pool slot) */
@@ -47,6 +62,7 @@ typedef struct {
 #define MAX_ENEMY_SLOTS 24
 static EnemyAI enemy_ai[MAX_ENEMY_SLOTS];
 static int total_kills;
+static int chase_transitions;
 
 /* Sprite tile data for enemies (8x8 tiles, 4 tiles per enemy = 16x16) */
 /* Each enemy type uses 8 OBJ tiles (2 frames x 4 tiles) */
@@ -216,120 +232,413 @@ static const u32 spr_hunter[4][4][8] = {
 };
 
 /* Palette data per enemy type — full 16-color material ramps
- * 0=transparent, 1=outline, 2-4=body gradient, 5-7=eye glow,
- * 8-9=accent, B-C=tech, D=AA edge, F=white */
+ * 0=transparent, 1=outline/deep shadow, 2=body shadow, 3=body mid,
+ * 4=body highlight, 5=glow/eye dim, 6=glow/eye mid, 7=glow/eye bright,
+ * 8=panel/accent dark, 9=panel/accent mid, A=panel/accent bright,
+ * B=tech dark, C=tech bright, D=AA edge, E=secondary highlight, F=white
+ *
+ * Palette bank mapping (avoids collisions per act composition table):
+ *   Sentry→1, Patrol→2, Flyer→3, Shield→4, Spike→5, Hunter→6,
+ *   Drone→9, Turret→10, Mimic→11, Corruptor→12, Ghost→1(shares w/Sentry,
+ *   never co-appear), Bomber→13 */
+static const u8 enemy_pal_bank[ENEMY_TYPE_COUNT] = {
+    1,  /* SENTRY */
+    2,  /* PATROL */
+    3,  /* FLYER */
+    4,  /* SHIELD */
+    5,  /* SPIKE */
+    6,  /* HUNTER */
+    9,  /* DRONE */
+    10, /* TURRET */
+    11, /* MIMIC */
+    12, /* CORRUPTOR */
+    1,  /* GHOST — shares bank 1 with Sentry (never coexist) */
+    13, /* BOMBER */
+};
+
+/* Sentry: Military olive-green + menacing red targeting laser */
 static const u16 pal_sentry[16] = {
     0,
-    RGB15_C(2,4,6), /* 1: outline */
-    RGB15_C(8,14,18), /* 2: dark body */
-    RGB15_C(14,20,24), /* 3: body */
-    RGB15_C(20,26,30), /* 4: highlight */
-    RGB15_C(24,4,4), /* 5: eye dim */
-    RGB15_C(31,10,8), /* 6: eye mid */
-    RGB15_C(31,22,16), /* 7: eye bright */
-    RGB15_C(6,18,24), /* 8: accent */
-    RGB15_C(10,24,28), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(4,12,16), /* B: tech dark */
-    RGB15_C(8,22,28), /* C: tech bright */
-    RGB15_C(4,8,12), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(2,4,2),    /* 1: deep olive outline */
+    RGB15_C(6,12,6),   /* 2: dark olive body */
+    RGB15_C(10,18,10), /* 3: mid olive body */
+    RGB15_C(16,24,16), /* 4: bright olive highlight */
+    RGB15_C(24,4,4),   /* 5: targeting dim red */
+    RGB15_C(31,10,6),  /* 6: targeting mid red */
+    RGB15_C(31,22,14), /* 7: targeting bright */
+    RGB15_C(4,8,4),    /* 8: panel dark */
+    RGB15_C(8,16,8),   /* 9: panel mid */
+    RGB15_C(12,20,12), /* A: panel bright */
+    RGB15_C(3,10,4),   /* B: tech dark */
+    RGB15_C(8,22,10),  /* C: tech bright */
+    RGB15_C(3,6,3),    /* D: AA edge */
+    RGB15_C(20,28,20), /* E: secondary highlight */
     RGB15_C(31,31,31), /* F: white */
 };
+/* Patrol: Bronze/copper armored guard + amber visor */
 static const u16 pal_patrol[16] = {
     0,
-    RGB15_C(4,2,2), /* 1: outline */
-    RGB15_C(16,8,4), /* 2: dark body */
-    RGB15_C(22,14,6), /* 3: body */
-    RGB15_C(28,20,10), /* 4: highlight */
-    RGB15_C(24,4,2), /* 5: eye dim */
-    RGB15_C(30,12,4), /* 6: eye mid */
-    RGB15_C(31,24,8), /* 7: eye bright */
-    RGB15_C(14,10,8), /* 8: accent */
-    RGB15_C(22,18,14), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(12,6,2), /* B: tech dark */
-    RGB15_C(20,12,4), /* C: tech bright */
-    RGB15_C(6,4,3), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(4,2,1),    /* 1: dark bronze outline */
+    RGB15_C(14,8,3),   /* 2: dark copper */
+    RGB15_C(22,14,5),  /* 3: mid bronze */
+    RGB15_C(28,20,8),  /* 4: bright bronze highlight */
+    RGB15_C(24,16,2),  /* 5: amber visor dim */
+    RGB15_C(30,24,6),  /* 6: amber visor mid */
+    RGB15_C(31,30,14), /* 7: amber visor bright */
+    RGB15_C(10,6,2),   /* 8: armor joint dark */
+    RGB15_C(18,12,4),  /* 9: armor joint mid */
+    RGB15_C(24,18,8),  /* A: armor joint highlight */
+    RGB15_C(10,5,1),   /* B: undersuit dark */
+    RGB15_C(18,10,3),  /* C: undersuit bright */
+    RGB15_C(6,3,1),    /* D: AA edge */
+    RGB15_C(26,22,12), /* E: warm highlight */
     RGB15_C(31,31,31), /* F: white */
 };
+/* Flyer: Teal-green wings + vivid yellow-green bioluminescent eyes */
 static const u16 pal_flyer[16] = {
     0,
-    RGB15_C(2,4,2), /* 1: outline */
-    RGB15_C(4,12,6), /* 2: dark body */
-    RGB15_C(8,18,10), /* 3: body */
-    RGB15_C(14,24,16), /* 4: highlight */
-    RGB15_C(20,20,4), /* 5: eye dim */
-    RGB15_C(28,28,8), /* 6: eye mid */
-    RGB15_C(31,31,16), /* 7: eye bright */
-    RGB15_C(6,14,8), /* 8: accent */
-    RGB15_C(10,20,12), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(4,10,6), /* B: tech dark */
-    RGB15_C(8,18,10), /* C: tech bright */
-    RGB15_C(3,6,3), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(1,4,3),    /* 1: deep teal outline */
+    RGB15_C(4,12,8),   /* 2: dark teal wing */
+    RGB15_C(8,20,14),  /* 3: mid teal wing */
+    RGB15_C(14,26,20), /* 4: bright teal highlight */
+    RGB15_C(18,24,4),  /* 5: bio-eye dim yellow-green */
+    RGB15_C(26,30,8),  /* 6: bio-eye mid */
+    RGB15_C(31,31,16), /* 7: bio-eye bright */
+    RGB15_C(3,10,6),   /* 8: wing membrane dark */
+    RGB15_C(6,16,10),  /* 9: wing membrane mid */
+    RGB15_C(10,22,16), /* A: wing membrane highlight */
+    RGB15_C(2,8,5),    /* B: vein dark */
+    RGB15_C(6,16,10),  /* C: vein bright */
+    RGB15_C(2,6,4),    /* D: AA edge */
+    RGB15_C(20,28,24), /* E: specular highlight */
     RGB15_C(31,31,31), /* F: white */
 };
+/* Shield: Heavy steel-blue armor + electric blue energy barrier */
 static const u16 pal_shield[16] = {
     0,
-    RGB15_C(3,3,4), /* 1: outline */
-    RGB15_C(8,10,12), /* 2: dark body */
-    RGB15_C(14,16,18), /* 3: body */
-    RGB15_C(20,22,24), /* 4: highlight */
-    RGB15_C(4,8,24), /* 5: eye dim */
-    RGB15_C(8,16,30), /* 6: eye mid */
-    RGB15_C(16,24,31), /* 7: eye bright */
-    RGB15_C(6,6,8), /* 8: accent */
-    RGB15_C(10,10,12), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(6,8,12), /* B: tech dark */
-    RGB15_C(12,14,18), /* C: tech bright */
-    RGB15_C(5,5,6), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(2,3,6),    /* 1: dark steel outline */
+    RGB15_C(6,8,14),   /* 2: dark steel body */
+    RGB15_C(12,14,22), /* 3: mid steel body */
+    RGB15_C(20,22,28), /* 4: bright steel highlight */
+    RGB15_C(4,10,28),  /* 5: barrier dim blue */
+    RGB15_C(8,18,31),  /* 6: barrier mid blue */
+    RGB15_C(18,26,31), /* 7: barrier bright */
+    RGB15_C(4,5,10),   /* 8: armor plate dark */
+    RGB15_C(8,10,16),  /* 9: armor plate mid */
+    RGB15_C(14,16,22), /* A: armor plate highlight */
+    RGB15_C(3,6,12),   /* B: rivet dark */
+    RGB15_C(10,14,24), /* C: rivet bright */
+    RGB15_C(3,4,8),    /* D: AA edge */
+    RGB15_C(24,26,30), /* E: polished highlight */
     RGB15_C(31,31,31), /* F: white */
 };
+/* Spike: Hot orange hazard spines + vivid yellow warning glow */
 static const u16 pal_spike[16] = {
     0,
-    RGB15_C(4,2,2), /* 1: outline */
-    RGB15_C(18,6,2), /* 2: dark body */
-    RGB15_C(24,10,4), /* 3: body */
-    RGB15_C(28,16,6), /* 4: highlight */
-    RGB15_C(28,20,4), /* 5: eye dim */
-    RGB15_C(31,26,8), /* 6: eye mid */
-    RGB15_C(31,31,16), /* 7: eye bright */
-    RGB15_C(20,4,4), /* 8: accent */
-    RGB15_C(24,8,4), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(14,4,2), /* B: tech dark */
-    RGB15_C(22,8,4), /* C: tech bright */
-    RGB15_C(6,3,2), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(6,2,0),    /* 1: deep red-brown outline */
+    RGB15_C(18,6,0),   /* 2: dark orange */
+    RGB15_C(26,12,2),  /* 3: mid hot orange */
+    RGB15_C(31,18,4),  /* 4: bright orange highlight */
+    RGB15_C(28,24,4),  /* 5: warning yellow dim */
+    RGB15_C(31,28,10), /* 6: warning yellow mid */
+    RGB15_C(31,31,18), /* 7: warning yellow bright */
+    RGB15_C(14,4,0),   /* 8: spine shadow */
+    RGB15_C(22,8,0),   /* 9: spine mid */
+    RGB15_C(28,14,2),  /* A: spine highlight */
+    RGB15_C(12,3,0),   /* B: base dark */
+    RGB15_C(20,6,0),   /* C: base bright */
+    RGB15_C(8,2,0),    /* D: AA edge */
+    RGB15_C(31,24,8),  /* E: hot glow */
     RGB15_C(31,31,31), /* F: white */
 };
+/* Hunter: Dark violet predator + blazing magenta tracking eye */
 static const u16 pal_hunter[16] = {
     0,
-    RGB15_C(4,2,6), /* 1: outline */
-    RGB15_C(12,6,16), /* 2: dark body */
-    RGB15_C(18,10,22), /* 3: body */
-    RGB15_C(24,16,28), /* 4: highlight */
-    RGB15_C(24,4,20), /* 5: eye dim */
-    RGB15_C(31,10,28), /* 6: eye mid */
-    RGB15_C(31,20,31), /* 7: eye bright */
-    RGB15_C(16,8,12), /* 8: accent */
-    RGB15_C(22,12,18), /* 9: accent2 */
-    0, /* 10: unused (unused) */
-    RGB15_C(10,4,14), /* B: tech dark */
-    RGB15_C(18,8,22), /* C: tech bright */
-    RGB15_C(6,3,8), /* D: AA edge */
-    0, /* 14: unused (unused) */
+    RGB15_C(4,1,6),    /* 1: deep purple outline */
+    RGB15_C(10,4,16),  /* 2: dark violet body */
+    RGB15_C(16,8,24),  /* 3: mid violet body */
+    RGB15_C(24,14,30), /* 4: bright violet highlight */
+    RGB15_C(28,4,20),  /* 5: magenta eye dim */
+    RGB15_C(31,12,28), /* 6: magenta eye mid */
+    RGB15_C(31,22,31), /* 7: magenta eye bright */
+    RGB15_C(8,3,12),   /* 8: cloak shadow */
+    RGB15_C(14,6,20),  /* 9: cloak mid */
+    RGB15_C(20,10,26), /* A: cloak highlight */
+    RGB15_C(6,2,10),   /* B: blade dark */
+    RGB15_C(14,6,22),  /* C: blade bright */
+    RGB15_C(5,2,8),    /* D: AA edge */
+    RGB15_C(28,18,31), /* E: energy trail */
     RGB15_C(31,31,31), /* F: white */
 };
 
+/* ---- New enemy type palettes (full 16-color, no unused slots) ---- */
 
-/* Sprite frame counts per type (spike has 3, others have 4) */
-static const u8 enemy_frame_count[ENEMY_TYPE_COUNT] = { 4, 4, 4, 4, 3, 4 };
+/* Drone: Electric cyan swarm unit + white-hot engine core */
+static const u16 pal_drone[16] = {
+    0,
+    RGB15_C(1,3,6),    /* 1: deep navy outline */
+    RGB15_C(4,10,20),  /* 2: dark hull */
+    RGB15_C(8,16,26),  /* 3: mid hull */
+    RGB15_C(14,22,31), /* 4: bright hull highlight */
+    RGB15_C(6,26,31),  /* 5: engine dim cyan */
+    RGB15_C(14,31,31), /* 6: engine mid cyan */
+    RGB15_C(24,31,31), /* 7: engine bright white-cyan */
+    RGB15_C(3,6,14),   /* 8: blade dark */
+    RGB15_C(6,12,22),  /* 9: blade mid */
+    RGB15_C(10,18,28), /* A: blade highlight */
+    RGB15_C(2,8,16),   /* B: thruster dark */
+    RGB15_C(8,18,28),  /* C: thruster bright */
+    RGB15_C(2,5,10),   /* D: AA edge */
+    RGB15_C(18,28,31), /* E: exhaust glow */
+    RGB15_C(31,31,31), /* F: white */
+};
+/* Turret: Gunmetal grey fortress + red-hot barrel heat */
+static const u16 pal_turret[16] = {
+    0,
+    RGB15_C(4,4,3),    /* 1: dark gunmetal outline */
+    RGB15_C(10,10,8),  /* 2: dark gunmetal body */
+    RGB15_C(18,18,14), /* 3: mid gunmetal */
+    RGB15_C(24,24,20), /* 4: bright gunmetal highlight */
+    RGB15_C(28,6,2),   /* 5: barrel heat dim */
+    RGB15_C(31,14,6),  /* 6: barrel heat mid */
+    RGB15_C(31,24,14), /* 7: barrel heat bright */
+    RGB15_C(6,6,5),    /* 8: armor plate dark */
+    RGB15_C(14,14,10), /* 9: armor plate mid */
+    RGB15_C(20,20,16), /* A: armor plate highlight */
+    RGB15_C(8,7,5),    /* B: mount dark */
+    RGB15_C(16,16,12), /* C: mount bright */
+    RGB15_C(3,3,2),    /* D: AA edge */
+    RGB15_C(28,28,24), /* E: polished surface */
+    RGB15_C(31,31,31), /* F: white */
+};
+/* Mimic: Deceptive green camouflage → danger red reveal */
+static const u16 pal_mimic[16] = {
+    0,
+    RGB15_C(3,5,1),    /* 1: dark camo outline */
+    RGB15_C(8,16,4),   /* 2: dark camo body */
+    RGB15_C(14,24,8),  /* 3: mid camo body */
+    RGB15_C(22,30,14), /* 4: bright camo highlight */
+    RGB15_C(31,10,4),  /* 5: reveal eye dim red */
+    RGB15_C(31,20,8),  /* 6: reveal eye mid */
+    RGB15_C(31,28,14), /* 7: reveal eye bright */
+    RGB15_C(6,10,3),   /* 8: leaf texture dark */
+    RGB15_C(10,18,6),  /* 9: leaf texture mid */
+    RGB15_C(18,26,10), /* A: leaf texture highlight */
+    RGB15_C(4,8,2),    /* B: vine dark */
+    RGB15_C(10,20,6),  /* C: vine bright */
+    RGB15_C(2,4,1),    /* D: AA edge */
+    RGB15_C(26,31,18), /* E: leaf sheen */
+    RGB15_C(31,31,31), /* F: white */
+};
+/* Corruptor: Toxic magenta-purple virus + sickly red infection */
+static const u16 pal_corruptor[16] = {
+    0,
+    RGB15_C(6,1,8),    /* 1: deep virus outline */
+    RGB15_C(14,4,18),  /* 2: dark virus body */
+    RGB15_C(22,8,26),  /* 3: mid virus body */
+    RGB15_C(28,14,31), /* 4: bright virus highlight */
+    RGB15_C(31,4,14),  /* 5: infection dim */
+    RGB15_C(31,12,22), /* 6: infection mid */
+    RGB15_C(31,22,28), /* 7: infection bright */
+    RGB15_C(10,2,12),  /* 8: membrane dark */
+    RGB15_C(18,6,22),  /* 9: membrane mid */
+    RGB15_C(24,10,28), /* A: membrane highlight */
+    RGB15_C(8,2,14),   /* B: core dark */
+    RGB15_C(18,4,24),  /* C: core bright */
+    RGB15_C(4,1,6),    /* D: AA edge */
+    RGB15_C(31,18,31), /* E: toxic shimmer */
+    RGB15_C(31,31,31), /* F: white */
+};
+/* Ghost: Pale ethereal silver-blue + cold ice-blue spectral glow */
+static const u16 pal_ghost[16] = {
+    0,
+    RGB15_C(4,4,10),   /* 1: spectral outline */
+    RGB15_C(10,10,20), /* 2: dark ectoplasm */
+    RGB15_C(18,18,28), /* 3: mid ectoplasm */
+    RGB15_C(24,24,31), /* 4: bright ectoplasm highlight */
+    RGB15_C(10,20,31), /* 5: spectral eye dim */
+    RGB15_C(18,26,31), /* 6: spectral eye mid */
+    RGB15_C(26,30,31), /* 7: spectral eye bright */
+    RGB15_C(6,6,14),   /* 8: wisp trail dark */
+    RGB15_C(12,12,22), /* 9: wisp trail mid */
+    RGB15_C(18,18,28), /* A: wisp trail highlight */
+    RGB15_C(6,8,18),   /* B: phase shimmer dark */
+    RGB15_C(14,16,28), /* C: phase shimmer bright */
+    RGB15_C(3,3,8),    /* D: AA edge */
+    RGB15_C(22,24,31), /* E: ethereal rim light */
+    RGB15_C(31,31,31), /* F: white */
+};
+/* Bomber: Dark amber fuselage + bright fire-orange ordnance glow */
+static const u16 pal_bomber[16] = {
+    0,
+    RGB15_C(5,3,1),    /* 1: dark amber outline */
+    RGB15_C(14,8,2),   /* 2: dark fuselage */
+    RGB15_C(22,14,4),  /* 3: mid fuselage */
+    RGB15_C(28,20,8),  /* 4: bright fuselage highlight */
+    RGB15_C(31,14,2),  /* 5: ordnance glow dim */
+    RGB15_C(31,22,6),  /* 6: ordnance glow mid */
+    RGB15_C(31,28,14), /* 7: ordnance glow bright */
+    RGB15_C(8,5,2),    /* 8: wing dark */
+    RGB15_C(16,10,4),  /* 9: wing mid */
+    RGB15_C(24,16,6),  /* A: wing highlight */
+    RGB15_C(6,4,1),    /* B: bomb bay dark */
+    RGB15_C(18,12,4),  /* C: bomb bay bright */
+    RGB15_C(4,2,1),    /* D: AA edge */
+    RGB15_C(31,26,12), /* E: heat shimmer */
+    RGB15_C(31,31,31), /* F: white */
+};
+
+/* ---- New enemy sprites (2 frames each, 4 tiles per frame) ---- */
+
+/* Drone: cyberpunk quad-rotor with glowing core + spinning blades */
+static const u32 spr_drone[4][4][8] = {
+  { /* frame 0 — blades horizontal */
+    { 0x00000000, 0xD1001D00, 0x01D76100, 0x00176500, 0x00165100, 0x01D65100, 0xD1001D00, 0x00000000 },
+    { 0x00000000, 0x00D100D1, 0x00016D10, 0x00567100, 0x00156100, 0x00156D10, 0x00D100D1, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — blades angled */
+    { 0x0D000000, 0x00D11000, 0x01D76100, 0x00176500, 0x00165100, 0x01D65100, 0x00D11000, 0x0D000000 },
+    { 0x000000D0, 0x0000D100, 0x00016D10, 0x00567100, 0x00156100, 0x00156D10, 0x0000D100, 0x000000D0 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — blades vertical */
+    { 0x00D00000, 0x00D11000, 0x01D76100, 0x00177500, 0x00167100, 0x01D65100, 0x00D11000, 0x00D00000 },
+    { 0x0000D000, 0x0000D100, 0x00016D10, 0x00577100, 0x00176100, 0x00156D10, 0x0000D100, 0x0000D000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — blades angled opposite */
+    { 0x00000D00, 0x00D11000, 0x01D76100, 0x00176500, 0x00165100, 0x01D65100, 0x00D11000, 0x00000D00 },
+    { 0x00D00000, 0x0000D100, 0x00016D10, 0x00567100, 0x00156100, 0x00156D10, 0x0000D100, 0x00D00000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Turret: armored base + rotating sensor dome + aimed barrel */
+static const u32 spr_turret[4][4][8] = {
+  { /* frame 0 — barrel right, sensor scanning */
+    { 0x00000000, 0x00111000, 0x01765100, 0x17654310, 0x36543210, 0x11111100, 0x13343310, 0x13443310 },
+    { 0x00000000, 0x00011100, 0x00015671, 0x01345671, 0x11234561, 0x00111111, 0x01334331, 0x01344331 },
+    { 0x11111100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00111111, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — barrel right, sensor glow bright */
+    { 0x00000000, 0x00111000, 0x01775100, 0x17765310, 0x37654310, 0x11111100, 0x13343310, 0x13443310 },
+    { 0x00000000, 0x00011100, 0x00015771, 0x01356771, 0x11345671, 0x00111111, 0x01334331, 0x01344331 },
+    { 0x11111100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00111111, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — barrel charging (glow on tip) */
+    { 0x00000000, 0x00111000, 0x01765100, 0x17654310, 0x36543210, 0x11111100, 0x13343310, 0x13443310 },
+    { 0x00000000, 0x00011100, 0x00015671, 0x01345671, 0x1123FF61, 0x00111111, 0x01334331, 0x01344331 },
+    { 0x11111100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00111111, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — barrel recoil */
+    { 0x00000000, 0x00111000, 0x01765100, 0x17654310, 0x36543100, 0x11111100, 0x13343310, 0x13443310 },
+    { 0x00000000, 0x00011100, 0x00015671, 0x01345671, 0x00123451, 0x00111111, 0x01334331, 0x01344331 },
+    { 0x11111100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00111111, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Mimic: disguised as loot box, erupts into spidery monster form */
+static const u32 spr_mimic[4][4][8] = {
+  { /* frame 0 — disguise (item box with subtle eye gleam) */
+    { 0x00000000, 0x01111100, 0x13443310, 0x14344410, 0x13443310, 0x13434310, 0x01111100, 0x00000000 },
+    { 0x00000000, 0x00111110, 0x01344331, 0x01443441, 0x01344331, 0x01343431, 0x00111110, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — emerging (box cracks, legs extend, eyes visible) */
+    { 0x00600000, 0x01177100, 0x13765310, 0x17654310, 0x36543110, 0x16765100, 0x01111100, 0x00100010 },
+    { 0x00000600, 0x00177110, 0x01356731, 0x01345671, 0x01134561, 0x00156761, 0x00111110, 0x01000100 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — fully revealed (spider legs out, fangs) */
+    { 0x10600010, 0x01177100, 0x13765310, 0x17654310, 0x36543110, 0x17654310, 0xD1111D00, 0x10D00010 },
+    { 0x01000601, 0x00177110, 0x01356731, 0x01345671, 0x01134561, 0x01345671, 0x00D111D1, 0x0100D001 },
+    { 0x00D00D00, 0x0D0000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00D00D00, 0x0D0000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — attack pose (lunging, legs spread) */
+    { 0xD0600D00, 0x01177100, 0x13775310, 0x17765310, 0x37654310, 0x17654310, 0x01111100, 0xD100001D },
+    { 0x00D006D0, 0x00177110, 0x01357731, 0x01356771, 0x01345671, 0x01345671, 0x00111110, 0xD100001D },
+    { 0x10000010, 0x01000010, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x01000001, 0x01000010, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Corruptor: hovering virus entity with corruption tendrils + pulsing core */
+static const u32 spr_corruptor[4][4][8] = {
+  { /* frame 0 — idle hover, tendrils down */
+    { 0x00000000, 0x00D11D00, 0x0D176510, 0x17654310, 0x36543210, 0x0D165100, 0x00D11D00, 0x0D0000D0 },
+    { 0x00000000, 0x00D11D00, 0x01567D10, 0x01345671, 0x01234561, 0x00156D10, 0x00D11D00, 0x0D0000D0 },
+    { 0x00D00D00, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00D00D00, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — core pulsing bright */
+    { 0x00000000, 0x00D11D00, 0x0D177610, 0x17765310, 0x37654310, 0x0D176100, 0x00D11D00, 0x00D00D00 },
+    { 0x00000000, 0x00D11D00, 0x01677D10, 0x01356771, 0x01345671, 0x00167D10, 0x00D11D00, 0x00D00D00 },
+    { 0x0D0000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x0D0000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — tendrils reaching, corruption spreading */
+    { 0x0D000000, 0x00D11D00, 0x0D176510, 0x17654310, 0x36543210, 0x0D165100, 0x00D11D00, 0x0D0000D0 },
+    { 0x000000D0, 0x00D11D00, 0x01567D10, 0x01345671, 0x01234561, 0x00156D10, 0x00D11D00, 0x0D0000D0 },
+    { 0x00D00D00, 0x000D0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00D00D00, 0x0000D000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — attack pose, tendrils forward */
+    { 0x00000000, 0x00D11D00, 0x0D177610, 0x17765310, 0x37654310, 0x0D176100, 0x00111D00, 0x0D1000D0 },
+    { 0x00000000, 0x00D11D00, 0x01677D10, 0x01356771, 0x01345671, 0x00167D10, 0x00D11100, 0x0D0001D0 },
+    { 0x0D000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x000000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Ghost: spectral wraith with flowing cloak and piercing eyes */
+static const u32 spr_ghost[4][4][8] = {
+  { /* frame 0 — floating, cloak trailing */
+    { 0x00000000, 0x00D11D00, 0x0D343410, 0xD3765310, 0x13434310, 0x13434310, 0x01343100, 0x00D0D000 },
+    { 0x00000000, 0x00D11D00, 0x01434D10, 0x01356731, 0x01343431, 0x01343431, 0x00134310, 0x000D0D00 },
+    { 0x000D0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x0000D000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — rising, cloak billows left */
+    { 0x00000000, 0x00D11D00, 0x0D434410, 0xD4765410, 0x14434410, 0x13434310, 0x01343100, 0x0D030D00 },
+    { 0x00000000, 0x00D11D00, 0x01444D10, 0x01456741, 0x01443441, 0x01343431, 0x00134310, 0x00D030D0 },
+    { 0x00D00000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x000000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — descending, cloak wide */
+    { 0x00000000, 0x0D0110D0, 0xD0343400, 0xD3776310, 0x14434310, 0x13443310, 0x01343100, 0x0D00D000 },
+    { 0x00000000, 0x0D0110D0, 0x00434300, 0x01367731, 0x01344441, 0x01344331, 0x00134310, 0x000D00D0 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — attack swoop, cloak trailing behind */
+    { 0x00000000, 0x00D11D00, 0x0D343410, 0xD3776510, 0x13454310, 0x13434310, 0x0D343D00, 0x00D0D000 },
+    { 0x00000000, 0x00D11D00, 0x01434D10, 0x01567731, 0x01345431, 0x01343431, 0x00D43D10, 0x000D0D00 },
+    { 0x000D0000, 0x0D000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x0000D000, 0x000000D0, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Bomber: heavy armored flyer with swept wings + bomb bay + exhaust glow */
+static const u32 spr_bomber[4][4][8] = {
+  { /* frame 0 — wings level, cruising */
+    { 0x00000000, 0x01D11000, 0xD3443100, 0x36765310, 0x17654310, 0x01654100, 0x00D11D00, 0x00000000 },
+    { 0x00000000, 0x0001D110, 0x01344D30, 0x01356761, 0x01345671, 0x00145610, 0x00D11D00, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 1 — wings tilted up */
+    { 0x0D000000, 0x01D11000, 0x13443100, 0x36765310, 0x17654310, 0x01654100, 0x00D11D00, 0x000D0000 },
+    { 0x000000D0, 0x0001D110, 0x01344310, 0x01356761, 0x01345671, 0x00145610, 0x00D11D00, 0x0000D000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 2 — bomb dropping */
+    { 0x00000000, 0x01D11000, 0xD3443100, 0x36765310, 0x17654310, 0x01654100, 0x00D11D00, 0x00010000 },
+    { 0x00000000, 0x0001D110, 0x01344D30, 0x01356761, 0x01345671, 0x00145610, 0x00D11D00, 0x00001000 },
+    { 0x00131000, 0x00111000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00013100, 0x00011100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+  { /* frame 3 — banking turn, wing glow */
+    { 0x00000000, 0x01D11000, 0xD3443100, 0x37776310, 0x17765310, 0x01765100, 0x00D11D00, 0x00000000 },
+    { 0x00000000, 0x0001D110, 0x01344D30, 0x01367771, 0x01356771, 0x00156710, 0x00D11D00, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
+    { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
+};
+
+/* Sprite frame counts per type (spike has 3, all others have 4) */
+static const u8 enemy_frame_count[ENEMY_TYPE_COUNT] = {
+    4, 4, 4, 4, 3, 4,  /* Original 6 */
+    4, 4, 4, 4, 4, 4,  /* New 6 */
+};
 
 /* Sprite data pointers per type */
 static const u32* const enemy_sprites[ENEMY_TYPE_COUNT] = {
@@ -339,17 +648,23 @@ static const u32* const enemy_sprites[ENEMY_TYPE_COUNT] = {
     (const u32*)spr_shield,
     (const u32*)spr_spike,
     (const u32*)spr_hunter,
+    (const u32*)spr_drone,
+    (const u32*)spr_turret,
+    (const u32*)spr_mimic,
+    (const u32*)spr_corruptor,
+    (const u32*)spr_ghost,
+    (const u32*)spr_bomber,
 };
 static const u16* const enemy_palettes[ENEMY_TYPE_COUNT] = {
     pal_sentry, pal_patrol, pal_flyer, pal_shield, pal_spike, pal_hunter,
+    pal_drone, pal_turret, pal_mimic, pal_corruptor, pal_ghost, pal_bomber,
 };
 
 /* OBJ tile base per enemy type (loaded dynamically) */
 /* Enemy tiles start at OBJ tile 48 (after player's 48 tiles) */
 #define ENEMY_TILE_BASE 48
 /* Each enemy type: 4 frames x 4 tiles = 16 tiles */
-/* OBJ palette banks: 1-6 for enemy types */
-#define ENEMY_PAL_BASE 1
+/* OBJ palette banks: per-type via enemy_pal_bank[] lookup table */
 
 static int slot_to_entity[MAX_ENEMY_SLOTS]; /* Entity pool index per enemy slot */
 
@@ -390,7 +705,15 @@ Entity* enemy_spawn(int subtype, int tile_x, int tile_y, int tier) {
     e->y = tile_y * 8 * 256;
     e->width = enemy_info[subtype].width;
     e->height = enemy_info[subtype].height;
-    e->hp = (s16)(enemy_info[subtype].hp + tier * 2);
+    {
+        int base_hp = enemy_info[subtype].hp + tier * 3;
+        /* NG+ scaling: +50% HP per NG+ cycle */
+        if (game_stats.ng_plus > 0) base_hp = base_hp * 3 / 2;
+        /* Threat level scaling: +10% HP per threat level */
+        if (game_stats.bb_threat_level > 0)
+            base_hp = base_hp * (10 + game_stats.bb_threat_level) / 10;
+        e->hp = (s16)base_hp;
+    }
     e->facing = 1; /* Face left by default (toward player) */
     e->on_ground = 0;
 
@@ -408,16 +731,38 @@ Entity* enemy_spawn(int subtype, int tile_x, int tile_y, int tier) {
     memcpy16(&tile_mem[4][tile_id], enemy_sprites[subtype],
              (u32)(num_frames * 4 * 8) * (u32)sizeof(u32) / 2);
 
-    /* Load palette */
-    int pal_bank = ENEMY_PAL_BASE + subtype;
-    if (pal_bank < 16) {
-        memcpy16(&pal_obj_mem[pal_bank * 16], enemy_palettes[subtype], 16);
+    /* Load palette into type-specific bank, tinted per act */
+    int pal_bank = enemy_pal_bank[subtype];
+    memcpy16(&pal_obj_mem[pal_bank * 16], enemy_palettes[subtype], 16);
+    /* Per-act color shift — subtle tint on palette entries 1-5 */
+    {
+        int act = (int)quest_state.current_act;
+        int r_shift = 0, g_shift = 0, b_shift = 0;
+        switch (act) {
+        case 0: r_shift = 0; g_shift = 1; b_shift = 2; break; /* Cyan */
+        case 1: r_shift = 0; g_shift = 0; b_shift = 2; break; /* Blue */
+        case 2: r_shift = 0; g_shift = 2; b_shift = 0; break; /* Green */
+        case 3: r_shift = 2; g_shift = 1; b_shift = 0; break; /* Orange */
+        case 4: r_shift = 1; g_shift = 0; b_shift = 1; break; /* Purple */
+        case 5: r_shift = 2; g_shift = 0; b_shift = 0; break; /* Red */
+        default: break;
+        }
+        for (int c = 1; c < 6; c++) {
+            u16 col = pal_obj_mem[pal_bank * 16 + c];
+            int r = (col & 0x1F) + r_shift;
+            int g = ((col >> 5) & 0x1F) + g_shift;
+            int b = ((col >> 10) & 0x1F) + b_shift;
+            if (r > 31) r = 31;
+            if (g > 31) g = 31;
+            if (b > 31) b = 31;
+            pal_obj_mem[pal_bank * 16 + c] = (u16)(r | (g << 5) | (b << 10));
+        }
     }
 
     /* Setup AI */
     int ent_idx = (int)(e - entity_get(0));
     slot_to_entity[slot] = ent_idx;
-    enemy_ai[slot].state = ESTATE_IDLE;
+    enemy_ai[slot].state = ESTATE_SPAWN;
     enemy_ai[slot].state_timer = 0;
     enemy_ai[slot].shoot_timer = 0;
     enemy_ai[slot].tier = (u8)tier;
@@ -646,6 +991,185 @@ static void ai_hunter(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
     if (e->vy > 512) e->vy = 512;
 }
 
+/* ---- New enemy AI functions ---- */
+
+static void ai_drone(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    /* Fast erratic swarm movement — sine wave approach */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dy = (int)((player_y - e->y) >> 8);
+    e->facing = (u8)((dx < 0) ? 1 : 0);
+    int dist = dx < 0 ? -dx : dx;
+
+    if (dist < enemy_info[ENEMY_DRONE].detection_range) {
+        ai->state = ESTATE_CHASE;
+        /* Erratic: oscillate vertically while pursuing horizontally */
+        e->vx = (s16)(dx > 0 ? 192 : -192);
+        ai->state_timer++;
+        int sine_ofs = ((ai->state_timer & 16) > 8) ? 128 : -128;
+        e->vy = (s16)(sine_ofs + (dy > 0 ? 64 : -64));
+    } else {
+        ai->state = ESTATE_IDLE;
+        e->vx = 0;
+        e->vy = 0;
+    }
+}
+
+static void ai_turret_enemy(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    (void)player_y;
+    /* Stationary, fires aimed projectile */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dist = dx < 0 ? -dx : dx;
+    e->facing = (u8)((dx < 0) ? 1 : 0);
+    e->vx = 0;
+
+    if (dist < enemy_info[ENEMY_TURRET].detection_range) {
+        ai->state = ESTATE_ATTACK;
+        ai->shoot_timer++;
+        if (ai->shoot_timer >= 90) {
+            ai->shoot_timer = 0;
+            /* Fire aimed shot */
+            int ent_idx = (int)(e - entity_get(0));
+            int proj_vx = e->facing ? -512 : 512;
+            projectile_spawn(
+                e->x + (e->facing ? -8 * 256 : 8 * 256),
+                e->y,
+                (s16)proj_vx, 0, (s16)ai->scaled_atk, SUBTYPE_PROJ_ENEMY,
+                PROJ_ENEMY, (u8)ent_idx);
+            audio_play_sfx(SFX_SHOOT);
+        }
+    } else {
+        ai->state = ESTATE_IDLE;
+    }
+    /* Gravity */
+    e->vy += 32;
+    if (e->vy > 512) e->vy = 512;
+}
+
+static void ai_mimic(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    /* Disguised until player gets close, then attacks */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dy = (int)((player_y - e->y) >> 8);
+    int dist = dx < 0 ? -dx : dx;
+
+    if (ai->state == ESTATE_IDLE && dist < 16 && (dy < 16 && dy > -16)) {
+        /* Reveal! Surprise transform with dramatic effects */
+        ai->state = ESTATE_CHASE;
+        audio_play_sfx(SFX_BOSS_PHASE);
+        video_shake(3, 1);
+        /* Shatter-transform burst */
+        particle_burst(e->x + ((s32)e->width << 7), e->y + ((s32)e->height << 7),
+                       3, PART_BURST, 200, 12);
+        hud_notify("MIMIC!", 30);
+    }
+
+    if (ai->state == ESTATE_CHASE) {
+        e->facing = (u8)((dx < 0) ? 1 : 0);
+        e->vx = e->facing ? -192 : 192;
+        /* Jump toward player */
+        if (e->on_ground && ai->shoot_timer == 0) {
+            e->vy = -384;
+            e->on_ground = 0;
+            ai->shoot_timer = 45;
+        }
+    } else {
+        e->vx = 0;
+    }
+
+    if (ai->shoot_timer > 0) ai->shoot_timer--;
+    e->vy += 32;
+    if (e->vy > 512) e->vy = 512;
+}
+
+static void ai_corruptor(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    (void)player_y;
+    /* Ranged attacker that fires corrupting projectiles */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dist = dx < 0 ? -dx : dx;
+    e->facing = (u8)((dx < 0) ? 1 : 0);
+
+    if (dist < enemy_info[ENEMY_CORRUPTOR].detection_range) {
+        ai->state = ESTATE_ATTACK;
+        /* Retreat if too close */
+        if (dist < 24) {
+            e->vx = e->facing ? 128 : -128; /* Run away */
+        } else {
+            e->vx = 0;
+        }
+        /* Fire every 60 frames */
+        ai->shoot_timer++;
+        if (ai->shoot_timer >= 60) {
+            ai->shoot_timer = 0;
+            int ent_idx = (int)(e - entity_get(0));
+            int proj_vx = e->facing ? -384 : 384;
+            projectile_spawn(
+                e->x + (e->facing ? -6 * 256 : 6 * 256),
+                e->y,
+                (s16)proj_vx, 0, (s16)ai->scaled_atk, SUBTYPE_PROJ_ENEMY,
+                PROJ_ENEMY, (u8)ent_idx);
+            audio_play_sfx(SFX_SHOOT);
+        }
+    } else {
+        ai->state = ESTATE_IDLE;
+        e->vx = 0;
+    }
+    e->vy += 32;
+    if (e->vy > 512) e->vy = 512;
+}
+
+static void ai_ghost_enemy(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    /* Phases through walls, sine-wave approach toward player */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dy = (int)((player_y - e->y) >> 8);
+    int dist = dx < 0 ? -dx : dx;
+    e->facing = (u8)((dx < 0) ? 1 : 0);
+
+    if (dist < enemy_info[ENEMY_GHOST].detection_range) {
+        ai->state = ESTATE_CHASE;
+        /* Move directly toward player (ignoring walls via no collision) */
+        e->vx = (s16)(dx > 0 ? 128 : -128);
+        e->vy = (s16)(dy > 0 ? 96 : -96);
+    } else {
+        ai->state = ESTATE_IDLE;
+        /* Float in place with slight bob */
+        ai->state_timer++;
+        e->vx = 0;
+        e->vy = (s16)(((ai->state_timer & 32) > 16) ? 32 : -32);
+    }
+    /* Note: ghost skips physics_resolve so it passes through walls */
+}
+
+static void ai_bomber(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
+    (void)player_y;
+    /* Flies above player, drops projectiles downward */
+    int dx = (int)((player_x - e->x) >> 8);
+    int dist = dx < 0 ? -dx : dx;
+    e->facing = (u8)((dx < 0) ? 1 : 0);
+
+    if (dist < enemy_info[ENEMY_BOMBER].detection_range) {
+        ai->state = ESTATE_ATTACK;
+        /* Fly horizontally toward player but stay above */
+        e->vx = (s16)(dx > 0 ? 160 : -160);
+        e->vy = -32; /* Float upward slowly */
+
+        /* Drop bomb every 90 frames when roughly above player */
+        ai->shoot_timer++;
+        if (ai->shoot_timer >= 90 && dist < 16) {
+            ai->shoot_timer = 0;
+            int ent_idx = (int)(e - entity_get(0));
+            projectile_spawn(
+                e->x,
+                e->y + 8 * 256,
+                0, 256, (s16)ai->scaled_atk, SUBTYPE_PROJ_ENEMY,
+                PROJ_ENEMY, (u8)ent_idx);
+            audio_play_sfx(SFX_SHOOT);
+        }
+    } else {
+        ai->state = ESTATE_IDLE;
+        e->vx = 0;
+        e->vy = 0;
+    }
+}
+
 IWRAM_CODE void enemy_update_all(s32 player_x, s32 player_y) {
     int hw = entity_get_high_water();
     for (int i = 0; i < hw; i++) {
@@ -665,6 +1189,18 @@ IWRAM_CODE void enemy_update_all(s32 player_x, s32 player_y) {
                 entity_despawn(e);
                 slot_to_entity[slot] = -1;
                 total_kills++;
+                /* Track global stats */
+                if (game_stats.total_kills < 65535) game_stats.total_kills++;
+                game_stats.current_combo++;
+                if (game_stats.current_combo > game_stats.highest_combo) {
+                    game_stats.highest_combo = game_stats.current_combo;
+                }
+                /* Codex: unlock enemy entry on first kill */
+                codex_unlock(CODEX_ENEMY_BASE + e->subtype);
+                /* Achievement: First Blood */
+                ach_unlock_celebrate(ACH_FIRST_BLOOD);
+                if (game_stats.total_kills >= 100) ach_unlock_celebrate(ACH_HUNTER);
+                if (game_stats.total_kills >= 500) ach_unlock_celebrate(ACH_EXTERMINATOR);
             }
             continue;
         }
@@ -676,6 +1212,9 @@ IWRAM_CODE void enemy_update_all(s32 player_x, s32 player_y) {
                 ai->state = ESTATE_IDLE;
                 ai->state_timer = 0;
             }
+            /* Apply gravity during hit stun (prevents floating) */
+            e->vy += 32;
+            if (e->vy > 512) e->vy = 512;
             /* Apply knockback with collision resolution */
             e->x += e->vx;
             physics_resolve_x(e);
@@ -684,22 +1223,50 @@ IWRAM_CODE void enemy_update_all(s32 player_x, s32 player_y) {
             continue;
         }
 
-        /* AI per type */
+        /* Spawn-in materialization (20-frame flicker) */
+        if (ai->state == ESTATE_SPAWN) {
+            ai->state_timer++;
+            if (ai->state_timer >= 20) {
+                ai->state = ESTATE_IDLE;
+                ai->state_timer = 0;
+                /* Spawn-in complete: sparkle burst */
+                particle_burst(e->x + ((s32)e->width << 7),
+                               e->y + ((s32)e->height << 7),
+                               3, PART_STAR, 120, 14);
+            }
+            continue; /* No AI during spawn-in */
+        }
+
+        /* AI per type — track state before for aggro detection */
+        int prev_state = ai->state;
         switch (e->subtype) {
         case ENEMY_SENTRY: ai_sentry(e, ai, player_x, player_y); break;
         case ENEMY_PATROL: ai_patrol(e, ai, player_x, player_y); break;
         case ENEMY_FLYER:  ai_flyer(e, ai, player_x, player_y); break;
         case ENEMY_SHIELD: ai_shield(e, ai, player_x, player_y); break;
         case ENEMY_SPIKE:  ai_spike(e, ai, player_x, player_y); break;
-        case ENEMY_HUNTER: ai_hunter(e, ai, player_x, player_y); break;
+        case ENEMY_HUNTER:    ai_hunter(e, ai, player_x, player_y); break;
+        case ENEMY_DRONE:     ai_drone(e, ai, player_x, player_y); break;
+        case ENEMY_TURRET:    ai_turret_enemy(e, ai, player_x, player_y); break;
+        case ENEMY_MIMIC:     ai_mimic(e, ai, player_x, player_y); break;
+        case ENEMY_CORRUPTOR: ai_corruptor(e, ai, player_x, player_y); break;
+        case ENEMY_GHOST:     ai_ghost_enemy(e, ai, player_x, player_y); break;
+        case ENEMY_BOMBER:    ai_bomber(e, ai, player_x, player_y); break;
+        }
+
+        /* Aggro indicator: "!" particle when enemy spots player */
+        if (prev_state != ESTATE_CHASE && ai->state == ESTATE_CHASE) {
+            particle_spawn(e->x + ((s32)e->width << 7),
+                           e->y - FP8(8), 0, -48, PART_STAR, 16);
+            chase_transitions++;
         }
 
         /* Apply velocity with tile collision resolution */
         e->on_ground = 0;
         e->x += e->vx;
-        physics_resolve_x(e);
+        if (e->subtype != ENEMY_GHOST) physics_resolve_x(e);
         e->y += e->vy;
-        physics_resolve_y(e);
+        if (e->subtype != ENEMY_GHOST) physics_resolve_y(e);
 
         /* World bounds */
         if (e->x < 0) e->x = 0;
@@ -746,12 +1313,16 @@ void enemy_draw_all(s32 cam_x, s32 cam_y) {
         }
 
         int tile_id = ENEMY_TILE_BASE + e->subtype * 16 + e->anim_frame * 4;
-        int pal_bank = ENEMY_PAL_BASE + e->subtype;
+        int pal_bank = enemy_pal_bank[e->subtype];
         u16 attr1_flip = e->facing ? ATTR1_HFLIP : 0;  /* sprite faces RIGHT natively */
 
-        /* Death flicker */
+        /* Death effect: mosaic ramp + flicker */
         EnemyAI* ai = &enemy_ai[slot];
         if (ai->state == ESTATE_DEAD) {
+            /* Ramp mosaic: 0→15 over 30 frames */
+            int mosaic_size = ai->state_timer / 2;
+            if (mosaic_size > 15) mosaic_size = 15;
+            video_mosaic_obj(mosaic_size);
             if (ai->state_timer & 2) {
                 OBJ_ATTR* oam = sprite_get(e->oam_index);
                 if (oam) oam->attr0 = ATTR0_HIDE;
@@ -766,12 +1337,59 @@ void enemy_draw_all(s32 cam_x, s32 cam_y) {
             continue;
         }
 
+        /* Spawn-in materialization flicker (visible 2 frames, hidden 1) */
+        if (ai->state == ESTATE_SPAWN && (ai->state_timer % 3 == 2)) {
+            OBJ_ATTR* oam = sprite_get(e->oam_index);
+            if (oam) oam->attr0 = ATTR0_HIDE;
+            continue;
+        }
+
+        /* Attack telegraph: particles first frame of ESTATE_ATTACK */
+        if (ai->state == ESTATE_ATTACK && ai->state_timer < 6) {
+            /* Type-specific telegraph particles */
+            if (ai->state_timer == 0) {
+                switch (e->subtype) {
+                case ENEMY_HUNTER:
+                    /* Charge-up sparks before lunge */
+                    particle_burst(e->x, e->y, 2, PART_SPARK, 120, 8);
+                    break;
+                case ENEMY_TURRET:
+                    /* Charge glow at muzzle */
+                    particle_spawn(e->x + (e->facing ? FP8(-8) : FP8(8)),
+                                   e->y + FP8(2), 0, 0, PART_STAR, 12);
+                    break;
+                case ENEMY_BOMBER:
+                    /* Downward spark trail on bomb drop */
+                    particle_spawn(e->x, e->y + FP8(8), 0, 64, PART_SPARK, 10);
+                    break;
+                case ENEMY_CORRUPTOR:
+                    /* Purple muzzle flash */
+                    particle_spawn(e->x + (e->facing ? FP8(-6) : FP8(6)),
+                                   e->y, 0, 0, PART_SPARK, 8);
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
         OBJ_ATTR* oam = sprite_get(e->oam_index);
         if (!oam) continue;
-        oam->attr0 = (u16)(ATTR0_SQUARE | ((u16)sy & 0xFF));
+        u16 mosaic_bit = (ai->state == ESTATE_DEAD) ? ATTR0_MOSAIC : 0;
+        oam->attr0 = (u16)(ATTR0_SQUARE | mosaic_bit | ((u16)sy & 0xFF));
         oam->attr1 = (u16)(ATTR1_SIZE_16 | attr1_flip | ((u16)sx & 0x1FF));
         oam->attr2 = (u16)(ATTR2_ID(tile_id) | ATTR2_PALBANK(pal_bank));
     }
+
+    /* Clear mosaic if no enemies are dying */
+    int any_dying = 0;
+    for (int i = 0; i < hw; i++) {
+        Entity* e2 = entity_get(i);
+        if (!e2 || e2->type != ENT_ENEMY) continue;
+        int s2 = entity_to_slot(e2);
+        if (s2 >= 0 && enemy_ai[s2].state == ESTATE_DEAD) { any_dying = 1; break; }
+    }
+    if (!any_dying) video_mosaic_obj(0);
 }
 
 IWRAM_CODE int enemy_check_player_attack(Entity* player) {
@@ -811,9 +1429,13 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                 if (e->subtype == ENEMY_SHIELD) {
                     int from_front = (e->facing && px > ex) || (!e->facing && px < ex);
                     if (from_front) {
-                        /* Blocked — deflect projectile and stagger player */
+                        /* Blocked — deflect projectile with visual feedback */
                         audio_play_sfx(SFX_MENU_BACK);
                         projectile_deactivate(p);
+                        /* Block sparks + flash + shake */
+                        particle_burst(p->x, p->y, 3, PART_SPARK, 180, 10);
+                        video_hit_flash_start(enemy_pal_bank[e->subtype], 2);
+                        video_shake(2, 1);
                         /* Push player away from shield */
                         if (player) {
                             s16 kb = (player->x > e->x) ? 96 : -96;
@@ -823,10 +1445,33 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                     }
                 }
 
-                /* Hit! Apply damage + directional knockback from projectile */
-                enemy_damage(e, p->damage);
-                e->vx = (p->vx > 0) ? 128 : -128;
-                total_dmg += p->damage;
+                /* Critical hit check: base 5% + LCK/2% + skill tree crit bonus */
+                {
+                    int crit_chance = 5 + player_state.lck / 2;
+                    /* Skill tree: offense branch index 0 = crit chance (+3/6/9%) */
+                    crit_chance += player_state.skill_tree[0] * 3;
+                    int is_crit = ((int)rand_range(100) < crit_chance);
+                    int hit_dmg = p->damage;
+                    if (is_crit) hit_dmg = hit_dmg * 2; /* Double damage on crit */
+
+                    /* Hit! Apply damage + directional knockback from projectile */
+                    enemy_damage(e, hit_dmg);
+                    e->vx = (p->vx > 0) ? 128 : -128;
+                    total_dmg += hit_dmg;
+                    /* Floating damage number */
+                    hud_floattext_spawn(e->x, e->y - FP8(4), hit_dmg, is_crit);
+
+                    if (is_crit) {
+                        /* Crit visual feedback: particles + shake */
+                        video_shake(3, 1);
+                        particle_burst(p->x, p->y, 3, PART_STAR, 200, 14);
+                        hud_notify("CRIT!", 20);
+                        audio_play_sfx(SFX_BOSS_ROAR);
+                    }
+                    /* Impact spark at collision point */
+                    particle_spawn(p->x, p->y, (s16)(-(p->vx >> 2)), -64,
+                                   PART_SPARK, 12);
+                }
 
                 /* Remove projectile unless piercing */
                 if (!(p->flags & PROJ_PIERCE)) {
@@ -840,20 +1485,69 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
 
 void enemy_damage(Entity* e, int dmg) {
     e->hp -= (s16)dmg;
+    /* Track damage dealt stat */
+    if (game_stats.damage_dealt < 65535 - dmg) game_stats.damage_dealt += (u16)dmg;
+    else game_stats.damage_dealt = 65535;
     audio_play_sfx(SFX_ENEMY_HIT);
+
+    /* Hit flash: briefly white-out the enemy's palette bank */
+    int pal_bank = enemy_pal_bank[e->subtype];
+    int flash_dur = (dmg >= 10) ? 4 : 2; /* Extended flash on heavy hits */
+    video_hit_flash_start(pal_bank, flash_dur);
 
     /* Knockback */
     int slot = entity_to_slot(e);
     if (slot >= 0) {
         enemy_ai[slot].state = ESTATE_HIT;
-        enemy_ai[slot].state_timer = 0;
+        /* Heavy hit hitstop: use 254 as sentinel for 2 extra freeze frames */
+        enemy_ai[slot].state_timer = (u8)((dmg >= 10) ? 254 : 0);
     }
-    /* Push away from damage source */
-    e->vx = e->facing ? 128 : -128;
-    e->vy = -64;
+    /* Push away from damage source — stationary enemies resist knockback */
+    int kb;
+    if (e->subtype == SUBTYPE_TURRET) {
+        kb = 32; /* Turrets barely move */
+    } else {
+        kb = (dmg >= 10) ? 192 : 128;
+    }
+    e->vx = (s16)(e->facing ? kb : -kb);
+    e->vy = (e->subtype == SUBTYPE_TURRET) ? 0 : -64;
 
     if (e->hp <= 0) {
         audio_play_sfx(SFX_ENEMY_DIE);
+        /* Death burst particles — scales with enemy tier */
+        {
+            s32 cx = e->x + ((s32)e->width << 7);
+            s32 cy = e->y + ((s32)e->height << 7);
+            int tier = (slot >= 0) ? enemy_ai[slot].tier : 1;
+            int pcount = 2 + (tier > 3 ? 2 : tier / 2); /* 2-4 particles */
+            int pspeed = 120 + tier * 20;
+            particle_burst(cx, cy, pcount, PART_BURST, pspeed, 14 + tier);
+            /* Per-type death variety */
+            switch (e->subtype) {
+            case SUBTYPE_DRONE:
+                particle_burst(cx, cy, 2, PART_SPARK, 180, 6);
+                break;
+            case SUBTYPE_TURRET:
+                particle_burst(cx, cy, 3, PART_BURST, 200, 16);
+                video_shake(2, 1);
+                break;
+            case SUBTYPE_MIMIC:
+                particle_burst(cx, cy, 3, PART_SPARK, 220, 8);
+                break;
+            case SUBTYPE_CORRUPTOR:
+                particle_burst(cx, cy, 2, PART_STAR, 80, 20);
+                break;
+            case SUBTYPE_GHOST:
+                particle_spawn(cx, cy, 0, -48, PART_STAR, 20);
+                break;
+            case SUBTYPE_BOMBER:
+                particle_burst(cx, cy, 3, PART_BURST, 250, 16);
+                video_shake(2, 1);
+                break;
+            default:
+                break;
+            }
+        }
         if (slot >= 0) {
             enemy_ai[slot].state = ESTATE_DEAD;
             enemy_ai[slot].state_timer = 0;
@@ -868,9 +1562,13 @@ void enemy_damage(Entity* e, int dmg) {
             /* Credit drop — scales with enemy type and tier */
             {
                 static const u8 base_credits[ENEMY_TYPE_COUNT] = {
-                    2, 3, 2, 4, 1, 5
+                    2, 3, 2, 4, 1, 5,  /* Sentry, Patrol, Flyer, Shield, Spike, Hunter */
+                    1, 3, 2, 4, 2, 3,  /* Drone, Turret, Mimic, Corruptor, Ghost, Bomber */
                 };
                 int cr = base_credits[e->subtype] + enemy_ai[slot].tier;
+                /* Skill tree: utility branch index 3 = credits bonus (+5/10/15%) */
+                int cr_bonus = player_state.skill_tree[11] * 5;
+                if (cr_bonus > 0) cr = cr * (100 + cr_bonus) / 100;
                 u32 total = (u32)player_state.credits + (u32)cr;
                 player_state.credits = (total > 0xFFFF) ? (u16)0xFFFF : (u16)total;
             }
@@ -911,6 +1609,14 @@ int enemy_count_alive(void) {
 
 int enemy_get_kills(void) {
     return total_kills;
+}
+
+int enemy_get_chase_count(void) {
+    return chase_transitions;
+}
+
+void enemy_reset_chase_count(void) {
+    chase_transitions = 0;
 }
 
 int enemy_get_atk(Entity* e) {

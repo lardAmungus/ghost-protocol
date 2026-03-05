@@ -7,7 +7,7 @@
 /*
  * Ghost Protocol — Boss System
  *
- * 5 story bosses, one per act. Only one loaded at a time.
+ * 6 story bosses, one per act. Only one loaded at a time.
  */
 
 /* Boss types */
@@ -17,6 +17,7 @@ enum {
     BOSS_WORM,           /* Tier 3: Multi-segment */
     BOSS_NEXUS_CORE,     /* Tier 4: Spawns minions */
     BOSS_ROOT_ACCESS,    /* Tier 5: Multi-phase humanoid */
+    BOSS_DAEMON,         /* Tier 6: AXIOM backup (copies boss patterns) */
     BOSS_TYPE_COUNT
 };
 
@@ -42,6 +43,9 @@ typedef struct {
     u8  hit_count;   /* Hits taken this vulnerability window */
     u8  defeated;
     u8  active;
+    u8  stage;       /* 1=P1(100-60%), 2=P2(60-30%), 3=P3(30-0%) */
+    u8  stage_announced; /* 1 if stage transition announced */
+    u8  enrage_announced; /* 1 if enrage (<10% HP) announced */
 } BossState;
 
 extern BossState boss_state;

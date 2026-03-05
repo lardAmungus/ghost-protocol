@@ -8,8 +8,10 @@
  * Ghost Protocol — Procedural Level Generator
  *
  * Generates side-scrolling Net levels from seed + tier.
- * 128x32 tiles (1024x256 px), divided into 8 sections.
+ * 256x32 tiles (2048x256 px), divided into 16 sections.
  */
+
+#define NUM_SECTIONS 16
 
 /* Section types */
 enum {
@@ -21,6 +23,12 @@ enum {
     SECT_DESCENT,        /* Downward path */
     SECT_MAZE,           /* Multi-path */
     SECT_BOSS,           /* Final arena */
+    SECT_WATERFALL,      /* Data stream vertical features */
+    SECT_TRANSIT,        /* Alternating height platforms */
+    SECT_SECURITY,       /* Laser grid hazards */
+    SECT_CACHE,          /* Hidden loot room */
+    SECT_NETWORK,        /* Multi-layer connected paths */
+    SECT_GAUNTLET,       /* Dense enemy combat */
     SECT_TYPE_COUNT
 };
 
@@ -96,14 +104,14 @@ enum {
 typedef struct {
     u8 tiles[NET_MAP_W * NET_MAP_H];   /* Visual tile map */
     u8 collision[NET_MAP_W * NET_MAP_H]; /* Collision map (TILE_* values) */
-    u8 sections[8];     /* Section type per 16-column chunk */
+    u8 sections[NUM_SECTIONS]; /* Section type per 16-column chunk */
     u16 seed;
     u8 tier;
     u8 is_boss_level;   /* 1 if last section is SECT_BOSS */
     u8 spawn_x, spawn_y; /* Player start position (tiles) */
     u8 exit_x, exit_y;   /* Exit gate position (tiles) */
     u8 num_spawns;       /* Number of enemy spawn points */
-    u8 spawn_points[32][2]; /* Enemy spawn positions (tile x,y) */
+    u8 spawn_points[48][2]; /* Enemy spawn positions (tile x,y) */
 } LevelData;
 
 extern LevelData level_data;
@@ -116,5 +124,8 @@ int levelgen_tile_at(int tx, int ty);
 
 /* Get collision type at position. */
 int levelgen_col_at(int tx, int ty);
+
+/* Set collision type at position (for breakable walls, etc.). */
+void levelgen_set_collision(int tx, int ty, int col_type);
 
 #endif /* GAME_LEVELGEN_H */

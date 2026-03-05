@@ -3,7 +3,7 @@
 static u32 rng_state = 1;  /* Must never be zero */
 
 void rng_seed(void) {
-    rng_state = REG_TM0CNT_L ^ ((u32)REG_TM1CNT_L << 16);
+    rng_state = REG_TM2CNT_L ^ ((u32)REG_TM3CNT_L << 16);
     if (rng_state == 0) rng_state = 1;
 }
 

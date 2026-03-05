@@ -12,7 +12,13 @@ enum {
     TILE_HAZARD    = 3,
     TILE_LADDER    = 4,
     TILE_BREAKABLE = 5,
+    TILE_TESLA     = 6,   /* Toggles between hazard/empty on timer */
+    TILE_CORRUPT   = 7,   /* Drains HP slowly */
+    TILE_STREAM    = 8,   /* Pushes player horizontally */
 };
+
+/* Tesla grid toggle — set by state_net every 90 frames */
+extern int collision_tesla_active;
 
 /* Set the collision map (pointer to byte array, width in tiles). */
 void collision_set_map(const u8* map, int width_tiles, int height_tiles);

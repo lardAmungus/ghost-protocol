@@ -33,4 +33,27 @@ void hud_set_trace(int frames);
 /* Set score display (replaces Lv during bug bounty). 0 = show Lv. */
 void hud_set_score(u16 score);
 
+/* Set camera X for section minimap (8.8 fixed-point). */
+void hud_set_camera_x(s32 cam_x_fp);
+
+/* Show damage direction indicator (0=left, 1=right). */
+void hud_damage_direction(int from_right);
+
+/* ---- Floating damage numbers ---- */
+
+/* Spawn a floating damage number at world position (8.8 fixed-point). */
+void hud_floattext_spawn(s32 wx, s32 wy, int value, int is_crit);
+
+/* Clear all floating text entries. */
+void hud_floattext_clear(void);
+
+/* Update floating text timers and positions. Call once per frame. */
+void hud_floattext_update(void);
+
+/* Draw floating text on BG0. Call once per frame after update. */
+void hud_floattext_draw(void);
+
+/* Set camera position for world→screen conversion (8.8 fixed-point). */
+void hud_set_camera(s32 cam_x_fp, s32 cam_y_fp);
+
 #endif /* GAME_HUD_H */

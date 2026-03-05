@@ -30,7 +30,7 @@ typedef struct {
     /* Quest progress */
     u8  quest_act;          /* Story act 0-5 (1) */
     u8  story_mission;      /* Completed story missions 0-20 (1) */
-    u8  boss_defeated[5];   /* Which bosses beaten (5) */
+    u8  boss_defeated[6];   /* Which bosses beaten (6) */
     u8  contracts_completed;/* Total side contracts done (1) */
     /* Equipment */
     u8  equipped_idx;       /* Which inventory slot is equipped (1) */
@@ -45,8 +45,35 @@ typedef struct {
     u16 bb_high_scores[5];  /* Per-tier high scores (10) */
     u8  bb_highest_unlocked;/* Highest tier unlocked 0-4 (1) */
     u8  bb_total_runs;      /* Total completed runs (1) */
+    /* Skill tree & evolution (Phase 1) */
+    u8  skill_tree[12];     /* Skill ranks (12 skills x rank 0-3) (12) */
+    u8  evolution;          /* EVOLUTION_* (1) */
+    u8  skill_points;       /* Unspent skill points (1) */
+    /* Crafting (Phase 2) */
+    u16 craft_shards;       /* Crafting currency (2) */
+    /* Progression (Phase 6) */
+    u8  ng_plus;            /* 0=normal, 1+=NG+ cycle (1) */
+    u8  choice_flags;       /* Story choice bits (2 bits x 4 choices) (1) */
+    u8  codex_unlocks[32];  /* Bitfield for 256 codex entries (32) */
+    u8  achievements[3];    /* 24 achievement bits (3) */
+    /* Statistics */
+    u32 play_time_frames;   /* Total play time in frames (4) */
+    u16 total_kills;        /* Enemies killed (2) */
+    u16 total_deaths;       /* Player deaths (2) */
+    u16 damage_dealt;       /* Total damage dealt (capped at 65535) (2) */
+    u16 damage_taken;       /* Total damage taken (capped at 65535) (2) */
+    u16 items_found;        /* Loot items found (2) */
+    u16 items_crafted;      /* Items crafted (2) */
+    u8  highest_combo;      /* Longest kill streak (1) */
+    u8  contracts_done;     /* Side contracts completed (1) */
+    /* Endgame */
+    u16 bb_endgame_contracts; /* Total endless contracts completed (2) */
+    u8  bb_boss_contracts;  /* Boss contracts completed (1) */
+    u8  bb_threat_level;    /* Permanent difficulty scaling (1) */
+    u8  bb_highest_level;   /* Highest player level reached (1) */
+    u8  endgame_unlocked;   /* 1=endless mode available (1) */
     /* Reserved for future use */
-    u8  reserved[298];      /* Pad to 512 total */
+    u8  reserved[222];      /* Pad to 512 total */
 } SaveData;                 /* 512 bytes */
 
 /* Write save data to a slot (0-2). */

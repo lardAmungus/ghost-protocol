@@ -18,12 +18,19 @@ enum {
     ENEMY_SHIELD,        /* Frontal block */
     ENEMY_SPIKE,         /* Extending hazard */
     ENEMY_HUNTER,        /* Aggressive chaser */
-    ENEMY_TYPE_COUNT
+    ENEMY_DRONE,         /* Small swarm unit */
+    ENEMY_TURRET,        /* Stationary aimed laser */
+    ENEMY_MIMIC,         /* Disguised as item drop */
+    ENEMY_CORRUPTOR,     /* Ranged corruption shots */
+    ENEMY_GHOST,         /* Phases through walls */
+    ENEMY_BOMBER,        /* Aerial bomb dropper */
+    ENEMY_TYPE_COUNT     /* 12 */
 };
 
 /* Enemy states (stored in Entity.anim_frame high bits via enemy local state) */
 enum {
-    ESTATE_IDLE = 0,
+    ESTATE_SPAWN = 0,  /* Materializing in — flicker for 20 frames */
+    ESTATE_IDLE,
     ESTATE_PATROL,
     ESTATE_CHASE,
     ESTATE_ATTACK,
@@ -74,5 +81,9 @@ void enemy_scale_atk(Entity* e, int scale256);
 
 /* Stun all alive enemies and deal damage to each. */
 void enemy_stun_all(int damage);
+
+/* Get/reset chase detection counter (for stealth achievements). */
+int enemy_get_chase_count(void);
+void enemy_reset_chase_count(void);
 
 #endif /* GAME_ENEMY_H */
