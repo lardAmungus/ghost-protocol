@@ -43,12 +43,30 @@ static const u32 part_tile_star[8] = {
     0x00000000, 0x00040000, 0x00474000, 0x04747400,
     0x00474000, 0x00040000, 0x00000000, 0x00000000,
 };
+/* Smoke: soft gray puff */
+static const u32 part_tile_smoke[8] = {
+    0x00000000, 0x00560000, 0x05665000, 0x56776500,
+    0x56776500, 0x05665000, 0x00560000, 0x00000000,
+};
+/* Electric: cyan zigzag */
+static const u32 part_tile_electric[8] = {
+    0x00000000, 0x03000000, 0x00310000, 0x00031000,
+    0x00310000, 0x03100000, 0x31000000, 0x00000000,
+};
+/* Heal: green cross glow */
+static const u32 part_tile_heal[8] = {
+    0x00000000, 0x00020000, 0x00242000, 0x02424200,
+    0x00242000, 0x00020000, 0x00000000, 0x00000000,
+};
 
 static void load_gfx(void) {
     if (gfx_loaded) return;
     memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 0], part_tile_spark, sizeof(part_tile_spark) / 2);
     memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 1], part_tile_burst, sizeof(part_tile_burst) / 2);
     memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 2], part_tile_star,  sizeof(part_tile_star) / 2);
+    memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 3], part_tile_smoke, sizeof(part_tile_smoke) / 2);
+    memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 4], part_tile_electric, sizeof(part_tile_electric) / 2);
+    memcpy16(&tile_mem_obj[0][PART_TILE_BASE + 5], part_tile_heal,  sizeof(part_tile_heal) / 2);
     gfx_loaded = 1;
 }
 
@@ -100,7 +118,7 @@ void particle_spawn(s32 wx, s32 wy, s16 vx, s16 vy, int type, int lifetime) {
     OBJ_ATTR* spr = sprite_get(oam);
     if (spr) {
         int tile_ofs = type;
-        if (tile_ofs > 2) tile_ofs = 0;
+        if (tile_ofs > 5) tile_ofs = 0;
         spr->attr0 = ATTR0_SQUARE | ATTR0_4BPP;
         spr->attr1 = ATTR1_SIZE_8;
         spr->attr2 = (u16)(ATTR2_ID(PART_TILE_BASE + tile_ofs) | ATTR2_PALBANK(PART_PAL_BANK));
@@ -131,13 +149,24 @@ void particle_update(void) {
         p->x += p->vx;
         p->y += p->vy;
 
-        /* Gravity (subtle downward pull for burst fragments) */
-        if (p->type == PART_BURST) {
+        /* Gravity (subtle downward pull for burst/smoke fragments) */
+        if (p->type == PART_BURST || p->type == PART_SMOKE) {
             p->vy += 8; /* light gravity */
         }
 
-        /* Friction (slow down sparks) */
-        if (p->type == PART_SPARK) {
+        /* Heal particles float upward */
+        if (p->type == PART_HEAL) {
+            p->vy -= 4;
+        }
+
+        /* Electric particles jitter randomly */
+        if (p->type == PART_ELECTRIC && (p->lifetime & 1)) {
+            p->vx = (s16)((int)rand_range(65) - 32);
+            p->vy = (s16)((int)rand_range(65) - 32);
+        }
+
+        /* Friction (slow down sparks/smoke) */
+        if (p->type == PART_SPARK || p->type == PART_SMOKE) {
             if (p->vx > 0) p->vx--;
             else if (p->vx < 0) p->vx++;
             if (p->vy > 0) p->vy--;

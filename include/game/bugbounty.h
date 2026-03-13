@@ -17,15 +17,23 @@ enum {
     BB_BUFFER_OVERFLOW,    /* Tier 8: x2.0 stats, more spawns */
     BB_STACK_SMASH,        /* Tier 9: x2.5 stats, elite enemies */
     BB_RING_ZERO,          /* Tier 10: x3.0 stats, all hunters */
-    BB_TIER_COUNT
+    BB_HEAP_SPRAY,         /* Tier 11: x4.0 stats, 45s timer */
+    BB_KERNEL_EXPLOIT,     /* Tier 12: x5.0 stats, 30s timer */
+    BB_TIER_COUNT          /* 7 */
 };
+
+/* Difficulty modifiers (tier 3+) */
+#define BB_MOD_NONE   0
+#define BB_MOD_SWARM  1  /* 2x enemies, half HP */
+#define BB_MOD_IRON   2  /* +50% enemy DEF */
 
 #define BB_BASE_TIER 6     /* Bug bounty starts at tier 6 */
 
 /* Bug bounty state */
 typedef struct {
     u8  active;            /* 1 if in bug bounty mode */
-    u8  tier;              /* BB_ZERO_DAY through BB_RING_ZERO */
+    u8  tier;              /* BB_ZERO_DAY through BB_KERNEL_EXPLOIT */
+    u8  modifier;          /* BB_MOD_* difficulty modifier */
     u16 score;             /* Current run score */
     u16 high_scores[BB_TIER_COUNT]; /* Per-tier best scores */
     u16 trace_timer;       /* Frames remaining before trace (0=no timer) */
@@ -75,9 +83,12 @@ u16 bugbounty_get_high_score(int tier);
 int bugbounty_get_rarity_floor(int tier);
 
 /* Restore persistent state from save data. */
-void bugbounty_restore(const u16 hs[5], u8 unlocked, u8 runs);
+void bugbounty_restore(const u16 hs[BB_TIER_COUNT], u8 unlocked, u8 runs);
 
 /* Pack persistent state for saving. */
-void bugbounty_pack(u16 hs_out[5], u8* unlocked_out, u8* runs_out);
+void bugbounty_pack(u16 hs_out[BB_TIER_COUNT], u8* unlocked_out, u8* runs_out);
+
+/* Get active modifier for current run. */
+int bugbounty_get_modifier(void);
 
 #endif /* GAME_BUGBOUNTY_H */

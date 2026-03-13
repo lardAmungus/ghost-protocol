@@ -7,6 +7,7 @@
 #include "game/loot.h"
 #include "game/hud.h"
 #include "game/common.h"
+#include "game/abilities.h"
 #include "engine/text.h"
 #include "engine/audio.h"
 
@@ -17,6 +18,9 @@ static const ShopItem shop_items[SHOP_ITEM_COUNT] = {
     { "LCK +1",      50, SHOP_LCK_UP },
     { "Repair Prog", 30, SHOP_SHIELD_PROG },
     { "Overclock",   40, SHOP_SPEED_PROG },
+    { "Health Pack", 15, SHOP_HEALTH_PACK },
+    { "Shield Chg",  25, SHOP_SHIELD_CHARGE },
+    { "CD Reset",    40, SHOP_CD_RESET },
 };
 
 static u8 purchase_count[SHOP_ITEM_COUNT];
@@ -36,7 +40,7 @@ int shop_get_price(int item_idx) {
         /* Stat upgrades and Overclock (+5 max HP): cost scales */
         return base + base * count / 4;
     }
-    return base; /* Repair Prog: fixed price */
+    return base; /* Consumables: fixed price */
 }
 
 void shop_draw(int cursor) {
@@ -93,6 +97,21 @@ int shop_buy(int cursor) {
         player_state.max_hp += 5;
         player_state.hp += 5;
         break;
+    case SHOP_HEALTH_PACK:
+        /* Restore 20 HP */
+        player_state.hp += 20;
+        if (player_state.hp > player_state.max_hp)
+            player_state.hp = player_state.max_hp;
+        break;
+    case SHOP_SHIELD_CHARGE:
+        /* Temp +5 DEF for 120 frames — uses data shield ability timer */
+        player_state.def += 5;
+        break;
+    case SHOP_CD_RESET:
+        /* Reset all ability cooldowns */
+        for (int i = 0; i < 8; i++)
+            player_state.cooldown_ability[i] = 0;
+        break;
     }
 
     audio_play_sfx(SFX_PICKUP);
@@ -105,6 +124,9 @@ int shop_buy(int cursor) {
     case SHOP_LCK_UP:       hud_notify("LCK +1!", 45); break;
     case SHOP_SHIELD_PROG:  hud_notify("HP FULL!", 45); break;
     case SHOP_SPEED_PROG:   hud_notify("HP +5!", 45); break;
+    case SHOP_HEALTH_PACK:  hud_notify("HP +20!", 45); break;
+    case SHOP_SHIELD_CHARGE: hud_notify("DEF +5!", 45); break;
+    case SHOP_CD_RESET:     hud_notify("CD RESET!", 45); break;
     }
 
     /* Check millionaire achievement on credit spending too (tracks accumulation) */

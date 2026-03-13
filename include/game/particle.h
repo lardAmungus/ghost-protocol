@@ -9,6 +9,9 @@
 #define PART_SPARK    0  /* Small impact spark */
 #define PART_BURST    1  /* Death burst fragment */
 #define PART_STAR     2  /* Loot sparkle / ability flash */
+#define PART_SMOKE    3  /* Gray explosion residue */
+#define PART_ELECTRIC 4  /* Cyan flicker (Tesla/EMP) */
+#define PART_HEAL     5  /* Green glow (HP recovery) */
 
 /* Initialize particle pool. */
 void particle_init(void);

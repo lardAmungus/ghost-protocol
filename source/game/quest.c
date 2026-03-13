@@ -352,7 +352,7 @@ void quest_generate_contracts(int player_level) {
             c->reward_rarity = RARITY_MYTHIC;    /* Guaranteed Mythic */
             c->reward_credits = (u16)(200 + tier * 50);
         } else {
-            c->type = (u8)(rand_range(3));
+            c->type = (u8)(rand_range(4)); /* EXTERMINATE/RETRIEVAL/SURVIVAL/BOUNTY */
             c->tier = (u8)tier;
             if (tier >= 4) {
                 c->reward_rarity = RARITY_RARE;

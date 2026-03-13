@@ -90,6 +90,16 @@ int ability_is_overclock_plus_active(void);
 /* Check if Upload (Technomancer) is active — marked enemy takes 2x. */
 int ability_is_upload_active(void);
 
+/* Get remaining frames for active buff (for HUD timer display). */
+int ability_get_overclock_timer(void);
+int ability_get_iron_skin_timer(void);
+int ability_get_berserk_timer(void);
+int ability_get_data_shield_timer(void);
+int ability_get_smoke_timer(void);
+int ability_get_backstab_timer(void);
+int ability_get_time_warp_timer(void);
+int ability_get_nanobots_timer(void);
+
 /* Reset active ability effects (call on player death/level transition). */
 void ability_reset(void);
 

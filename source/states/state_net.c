@@ -33,6 +33,13 @@
 #include "states/state_ids.h"
 #include "states/state_net.h"
 
+/* Clamp scaled HP to s16 range (prevents overflow wrapping negative) */
+static inline s16 clamp_hp(int hp) {
+    if (hp > 32767) hp = 32767;
+    if (hp < 1) hp = 1;
+    return (s16)hp;
+}
+
 /* Net sub-states */
 enum {
     NETSUB_FADEIN = 0,
@@ -60,9 +67,19 @@ static int wave_timer;        /* Frames until next wave check */
 
 /* Hazard tile damage cooldown (prevents instant death on hazard tiles) */
 static int hazard_cd;
+static int hazard_flash; /* Frames remaining for red hazard flash */
 
 /* Ambient palette cycling timer */
 static int ambient_timer;
+
+/* Bug bounty enemy composition table (cumulative thresholds per tier) */
+static const u8 bb_comp[BB_TIER_COUNT][6] = {
+    { 15, 30, 40, 55, 65, 100 },
+    { 10, 20, 30, 50, 60, 100 },
+    {  5, 15, 20, 40, 55, 100 },
+    {  0,  5, 10, 35, 55, 100 },
+    {  0,  0,  0,  0,  0, 100 },
+};
 
 /* Boss intro cinematic */
 static int boss_intro_done;
@@ -131,6 +148,7 @@ static int check_exit(void) {
 /* Spawn enemies at generated spawn points */
 static void spawn_enemies(int tier) {
     enemy_init();
+    enemy_reset_grace_timer(); /* 60-frame grace before enemies chase */
     enemies_killed = 0;
     milestone_shown = 0;
 
@@ -152,13 +170,6 @@ static void spawn_enemies(int tier) {
             /*  T2 Buffer Overflow: 5/10/ 5/20/15/45 */
             /*  T3 Stack Smash:     0/ 5/ 5/25/20/45 */
             /*  T4 Ring Zero:       0/ 0/ 0/ 0/ 0/100 (all hunters) */
-            static const u8 bb_comp[BB_TIER_COUNT][6] = {
-                { 15, 30, 40, 55, 65, 100 }, /* cumulative thresholds */
-                { 10, 20, 30, 50, 60, 100 },
-                {  5, 15, 20, 40, 55, 100 },
-                {  0,  5, 10, 35, 55, 100 },
-                {  0,  0,  0,  0,  0, 100 },
-            };
             int bt = bb_state.tier;
             if (bt >= BB_TIER_COUNT) bt = BB_TIER_COUNT - 1;
             if (roll < bb_comp[bt][0]) subtype = ENEMY_SENTRY;
@@ -200,14 +211,14 @@ static void spawn_enemies(int tier) {
             int section = tx / 16;
             if (section > 3) {
                 int sec_scale = 256 + (section / 4) * 26; /* ~+10% per 4 sections */
-                e->hp = (s16)((e->hp * sec_scale) >> 8);
+                e->hp = clamp_hp((e->hp * sec_scale) >> 8);
                 enemy_scale_atk(e, sec_scale);
             }
         }
 
         /* Apply bug bounty stat scaling to HP and ATK */
         if (e && bb_scale != 256) {
-            e->hp = (s16)((e->hp * bb_scale) >> 8);
+            e->hp = clamp_hp((e->hp * bb_scale) >> 8);
             enemy_scale_atk(e, bb_scale);
         }
     }
@@ -234,6 +245,7 @@ void state_net_enter(void) {
     /* NOTE: Do NOT call inventory_init() here — it wipes persistent inventory */
     itemdrop_init();
     hazard_cd = 0;
+    hazard_flash = 0;
     ambient_timer = 0;
     boss_intro_done = 0;
     boss_warning_shown = 0;
@@ -354,9 +366,9 @@ void state_net_enter(void) {
         /* Apply bug bounty stat scaling to boss */
         if (bb_state.active && boss_state.active) {
             int bb_scale = bugbounty_stat_scale(bb_state.tier);
-            boss_state.hp = (s16)((boss_state.hp * bb_scale) >> 8);
+            boss_state.hp = clamp_hp((boss_state.hp * bb_scale) >> 8);
             boss_state.max_hp = boss_state.hp;
-            boss_state.atk = (s16)((boss_state.atk * bb_scale) >> 8);
+            boss_state.atk = clamp_hp((boss_state.atk * bb_scale) >> 8);
         }
     }
 
@@ -483,7 +495,7 @@ static void update_play(void) {
         int alive = enemy_count_alive();
         int intensity = 0;
         if (boss_state.active && boss_state.hp > 0 &&
-            boss_state.hp * 100 / boss_state.max_hp < 30) {
+            boss_state.max_hp > 0 && boss_state.hp * 100 / boss_state.max_hp < 30) {
             intensity = 2; /* Boss low HP — max intensity */
         } else if (alive >= 6 || boss_state.active) {
             intensity = 1; /* Many enemies or boss present */
@@ -513,6 +525,15 @@ static void update_play(void) {
             s16 kb = (p->x > be->x) ? 128 : -128;
             player_take_damage(boss_state.atk, kb, -64);
             /* SFX_PLAYER_HIT + shake handled inside player_take_damage */
+        }
+    }
+
+    /* Clamp player to arena during boss fight — prevent knockback escape */
+    if (p && boss_intro_done && boss_is_active()) {
+        s32 arena_min_x = (s32)((NUM_SECTIONS - 1) * 16) * 8 * 256;
+        if (p->x < arena_min_x) {
+            p->x = arena_min_x;
+            p->vx = 0;
         }
     }
 
@@ -559,7 +580,7 @@ static void update_play(void) {
             /* Hazard damage particles at player feet */
             particle_burst(p->x + FP8(6), p->y + FP8(12), 4, PART_SPARK, 160, 12);
             /* Brief red BG flash for hazard pain + damage number */
-            pal_bg_mem[0] = RGB15(8, 0, 0);
+            hazard_flash = 6;
             hud_floattext_spawn(p->x, p->y - FP8(8), 3, 0);
             hud_notify("HAZARD!", 20);
         }
@@ -672,13 +693,6 @@ static void update_play(void) {
                             int roll = (int)rand_range(100);
                             int subtype;
                             if (bb_state.active) {
-                                static const u8 bb_comp[BB_TIER_COUNT][6] = {
-                                    { 15, 30, 40, 55, 65, 100 },
-                                    { 10, 20, 30, 50, 60, 100 },
-                                    {  5, 15, 20, 40, 55, 100 },
-                                    {  0,  5, 10, 35, 55, 100 },
-                                    {  0,  0,  0,  0,  0, 100 },
-                                };
                                 int bt = bb_state.tier;
                                 if (bt >= BB_TIER_COUNT) bt = BB_TIER_COUNT - 1;
                                 if (roll < bb_comp[bt][0]) subtype = ENEMY_SENTRY;
@@ -712,12 +726,12 @@ static void update_play(void) {
                                 int section = stx / 16;
                                 if (section > 3) {
                                     int sec_scale = 256 + (section / 4) * 26;
-                                    we->hp = (s16)((we->hp * sec_scale) >> 8);
+                                    we->hp = clamp_hp((we->hp * sec_scale) >> 8);
                                     enemy_scale_atk(we, sec_scale);
                                 }
                             }
                             if (bb_scale != 256) {
-                                we->hp = (s16)((we->hp * bb_scale) >> 8);
+                                we->hp = clamp_hp((we->hp * bb_scale) >> 8);
                                 enemy_scale_atk(we, bb_scale);
                             }
                         }
@@ -1012,7 +1026,11 @@ static void update_play(void) {
         if (tint_act < 0) tint_act = 0;
         if (tint_act > 6) tint_act = 6;
 
-        if (player_is_alive() && player_state.hp > 0 &&
+        if (hazard_flash > 0) {
+            /* Hazard red flash — overrides ambient tint for a few frames */
+            pal_bg_mem[0] = (u16)RGB15(8, 0, 0);
+            hazard_flash--;
+        } else if (player_is_alive() && player_state.hp > 0 &&
             player_state.hp <= player_state.max_hp / 4) {
             /* Pulsing red tint on BG0 palette entry 0 (background color) */
             int beat = ambient_timer & 23; /* 24-frame cycle */
@@ -1133,18 +1151,18 @@ void state_net_update(void) {
                 text_clear_rect(6, 6, 18, 7);
                 text_print(7, 6, "-- STATS --");
                 {
-                    char buf[20];
-                    /* Kills */
-                    buf[0] = 'K'; buf[1] = 'i'; buf[2] = 'l'; buf[3] = 'l'; buf[4] = 's'; buf[5] = ':'; buf[6] = ' ';
                     text_print_int(14, 7, enemies_killed);
                     text_print(7, 7, "Kills:");
-                    /* Time */
-                    buf[0] = 'T'; buf[1] = 'i'; buf[2] = 'm'; buf[3] = 'e'; buf[4] = ':'; buf[5] = ' ';
-                    buf[6] = (char)('0' + min);
-                    buf[7] = ':';
-                    buf[8] = (char)('0' + sec / 10);
-                    buf[9] = (char)('0' + sec % 10);
-                    buf[10] = '\0';
+                    /* Time — supports 2-digit minutes */
+                    char buf[12];
+                    int p = 0;
+                    buf[p++] = 'T'; buf[p++] = 'i'; buf[p++] = 'm'; buf[p++] = 'e'; buf[p++] = ':'; buf[p++] = ' ';
+                    if (min >= 10) buf[p++] = (char)('0' + min / 10);
+                    buf[p++] = (char)('0' + min % 10);
+                    buf[p++] = ':';
+                    buf[p++] = (char)('0' + sec / 10);
+                    buf[p++] = (char)('0' + sec % 10);
+                    buf[p] = '\0';
                     text_print(7, 8, buf);
                     /* Damage */
                     text_print(7, 9, "Dmg:");
@@ -1233,11 +1251,13 @@ void state_net_update(void) {
                 text_print(8, 10, "Time:");
                 {
                     char buf[8];
-                    buf[0] = (char)('0' + min);
-                    buf[1] = ':';
-                    buf[2] = (char)('0' + sec / 10);
-                    buf[3] = (char)('0' + sec % 10);
-                    buf[4] = '\0';
+                    int p = 0;
+                    if (min >= 10) buf[p++] = (char)('0' + min / 10);
+                    buf[p++] = (char)('0' + min % 10);
+                    buf[p++] = ':';
+                    buf[p++] = (char)('0' + sec / 10);
+                    buf[p++] = (char)('0' + sec % 10);
+                    buf[p] = '\0';
                     text_print(14, 10, buf);
                 }
                 text_print(8, 11, "Dmg dealt:");

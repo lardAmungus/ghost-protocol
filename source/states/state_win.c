@@ -207,7 +207,12 @@ void state_win_update(void) {
             }
             epi_line = EPI_LINES;
         }
-    } else if (phase == WIN_CREDITS && (timer > 240 || input_hit(KEY_A))) {
+    } else if (phase == WIN_CREDITS) {
+        /* Scroll credits upward — 1 pixel every 2 frames */
+        if ((timer & 1) == 0) credit_scroll_y++;
+        REG_BG0VOFS = (u16)credit_scroll_y;
+    }
+    if (phase == WIN_CREDITS && (timer > 240 || input_hit(KEY_A))) {
         phase = WIN_NGPLUS;
         timer = 0;
         ng_cursor = 0;
@@ -236,11 +241,13 @@ void state_win_update(void) {
                 quest_state.current_act = 0;
                 for (int i = 0; i < 6; i++) quest_state.boss_defeated[i] = 0;
                 if (!ach_unlocked(ACH_NG_PLUS_CLEARED)) ach_unlock(ACH_NG_PLUS_CLEARED);
+                state_terminal_save_current(0); /* Auto-save NG+ state */
                 game_request_state = STATE_TERMINAL;
             } else if (ng_cursor == 1) {
                 /* Endless Bug Bounty */
                 game_stats.endgame_unlocked = 1;
                 if (!ach_unlocked(ACH_ENDGAME)) ach_unlock(ACH_ENDGAME);
+                state_terminal_save_current(0); /* Auto-save endgame state */
                 game_request_state = STATE_TERMINAL;
             } else {
                 /* Title screen */

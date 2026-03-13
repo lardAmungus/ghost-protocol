@@ -79,6 +79,8 @@ static void state_switch(int new_state) {
         && state_table[current_state].exit) {
         state_table[current_state].exit();
     }
+    /* Reset all visual effects so shake/flash/transitions don't persist */
+    video_reset_effects();
     current_state = new_state;
     if (state_table[current_state].enter) {
         state_table[current_state].enter();
@@ -143,12 +145,11 @@ int main(void) {
             state_switch(game_request_state);
         }
 
-        if (state_table[current_state].update) {
-            state_table[current_state].update();
-        }
-
-        if (state_table[current_state].draw) {
-            state_table[current_state].draw();
+        if (current_state > STATE_NONE && current_state < STATE_COUNT) {
+            if (state_table[current_state].update)
+                state_table[current_state].update();
+            if (state_table[current_state].draw)
+                state_table[current_state].draw();
         }
 
         game_stats.play_time_frames++;

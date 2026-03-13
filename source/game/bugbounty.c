@@ -7,6 +7,7 @@
 #include "game/bugbounty.h"
 #include "game/quest.h"
 #include "game/common.h"
+#include "engine/rng.h"
 #include <string.h>
 
 BugBountyState bb_state;
@@ -17,16 +18,18 @@ static const char* const tier_names[BB_TIER_COUNT] = {
     "Buffer Overflow",
     "Stack Smash",
     "Ring Zero",
+    "Heap Spray",
+    "Kernel Exploit",
 };
 
-/* Stat multipliers (x256 fixed-point): 1.5x, 1.8x, 2.0x, 2.5x, 3.0x */
+/* Stat multipliers (x256 fixed-point): 1.5x → 5.0x */
 static const u16 stat_scales[BB_TIER_COUNT] = {
-    384, 460, 512, 640, 768,
+    384, 460, 512, 640, 768, 1024, 1280,
 };
 
-/* Trace timer in seconds per tier (0 = no timer for tier 6) */
+/* Trace timer in seconds per tier (0 = no timer for tier 0) */
 static const u8 trace_seconds[BB_TIER_COUNT] = {
-    0, 120, 90, 75, 60,
+    0, 120, 90, 75, 60, 45, 30,
 };
 
 /* Minimum rarity floor per tier */
@@ -36,6 +39,8 @@ static const u8 rarity_floors[BB_TIER_COUNT] = {
     RARITY_RARE,      /* Buffer Overflow */
     RARITY_RARE,      /* Stack Smash */
     RARITY_EPIC,      /* Ring Zero */
+    RARITY_EPIC,      /* Heap Spray */
+    RARITY_LEGENDARY, /* Kernel Exploit */
 };
 
 void bugbounty_init(void) {
@@ -57,7 +62,15 @@ void bugbounty_start(int tier) {
     bb_state.tier = (u8)tier;
     bb_state.score = 0;
     bb_state.kills = 0;
+    bb_state.run_complete = 0;
     bb_state.rarity_floor = rarity_floors[tier];
+
+    /* Difficulty modifiers at tier 3+ */
+    if (tier >= 3) {
+        bb_state.modifier = (u8)(1 + (rand_range(2))); /* SWARM or IRON */
+    } else {
+        bb_state.modifier = BB_MOD_NONE;
+    }
 
     int seconds = trace_seconds[tier];
     bb_state.trace_timer = (u16)(seconds * 60); /* frames */
@@ -176,7 +189,11 @@ int bugbounty_get_rarity_floor(int tier) {
     return rarity_floors[tier];
 }
 
-void bugbounty_restore(const u16 hs[5], u8 unlocked, u8 runs) {
+int bugbounty_get_modifier(void) {
+    return bb_state.modifier;
+}
+
+void bugbounty_restore(const u16 hs[BB_TIER_COUNT], u8 unlocked, u8 runs) {
     for (int i = 0; i < BB_TIER_COUNT; i++) {
         bb_state.high_scores[i] = hs[i];
     }
@@ -184,7 +201,7 @@ void bugbounty_restore(const u16 hs[5], u8 unlocked, u8 runs) {
     bb_state.total_runs = runs;
 }
 
-void bugbounty_pack(u16 hs_out[5], u8* unlocked_out, u8* runs_out) {
+void bugbounty_pack(u16 hs_out[BB_TIER_COUNT], u8* unlocked_out, u8* runs_out) {
     for (int i = 0; i < BB_TIER_COUNT; i++) {
         hs_out[i] = bb_state.high_scores[i];
     }

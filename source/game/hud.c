@@ -40,6 +40,8 @@ static struct {
     int value;         /* Damage/heal value to display */
     int timer;         /* Frames remaining (0=inactive) */
     int is_crit;       /* 1=critical hit (blinks faster) */
+    s8 prev_sx, prev_sy; /* Previous screen tile position (for targeted clear) */
+    u8 prev_digits;      /* Number of digits drawn last frame */
 } floats[MAX_FLOATS];
 
 /* Notification */
@@ -59,6 +61,7 @@ void hud_init(void) {
     trace_frames = 0;
     hud_score = 0;
     hud_cam_x = 0;
+    hud_cam_y = 0;
     notify_msg = NULL;
     notify_timer = 0;
     dmg_dir_timer = 0;
@@ -137,13 +140,19 @@ void hud_draw(void) {
                 prev_cd[i] = (u8)(cd > 255 ? 255 : cd);
 
                 if (cd > 0) {
+                    /* Dim→bright color: amber when >50% left, green when <50% */
+                    int max_cd = 300; /* rough max */
+                    int pal = (cd * 2 > max_cd) ? (1 << 12) : 0; /* amber or green */
                     int secs = (cd + 59) / 60;
-                    text_print_int(i * 4, 1, secs);
+                    u16 tile = (u16)(('0' + secs - ' ') | pal);
+                    ((u16*)se_mem[31])[1 * 32 + i * 4] = tile;
                 } else {
-                    /* Ready indicator — blink 'R' during flash */
+                    /* Ready indicator — blink 'R' with increasing speed */
                     if (flash_timer[i] > 0) {
                         flash_timer[i]--;
-                        if (flash_timer[i] & 2)
+                        /* Blink speed increases: slow→fast as timer counts down */
+                        int blink_rate = (flash_timer[i] > 8) ? 4 : 2;
+                        if (flash_timer[i] % blink_rate < blink_rate / 2)
                             text_put_char(i * 4, 1, '*');
                         else
                             text_put_char(i * 4, 1, 'R');
@@ -280,45 +289,25 @@ void hud_draw(void) {
         int col = 0;
         text_clear_rect(0, 2, 13, 1);
 
-        /* Check each buff-type ability that has an active timer */
-        if (ability_is_overclock_active() && col < 11) {
-            text_put_char(col, 2, 'O');
-            text_put_char(col + 1, 2, 'C');
-            col += 3;
-        }
-        if (ability_is_iron_skin_active() && col < 11) {
-            text_put_char(col, 2, 'I');
-            text_put_char(col + 1, 2, 'S');
-            col += 3;
-        }
-        if (ability_is_berserk_active() && col < 11) {
-            text_put_char(col, 2, 'B');
-            text_put_char(col + 1, 2, 'S');
-            col += 3;
-        }
-        if (ability_is_data_shield_active() && col < 11) {
-            text_put_char(col, 2, 'D');
-            text_put_char(col + 1, 2, 'S');
-            col += 3;
-        }
-        if (ability_is_smoke_active() && col < 11) {
-            text_put_char(col, 2, 'S');
-            text_put_char(col + 1, 2, 'M');
-            col += 3;
-        }
-        if (ability_is_backstab_active() && col < 11) {
-            text_put_char(col, 2, 'B');
-            text_put_char(col + 1, 2, 'K');
-            col += 3;
-        }
-        if (ability_is_time_warp_active() && col < 11) {
-            text_put_char(col, 2, 'T');
-            text_put_char(col + 1, 2, 'W');
-            col += 3;
-        }
-        if (ability_is_nanobots_active() && col < 11) {
-            text_put_char(col, 2, 'N');
-            text_put_char(col + 1, 2, 'B');
+        /* Check each buff — show 2-letter code + remaining seconds */
+        struct { int active; int timer; char c0; char c1; } efx[] = {
+            { ability_is_overclock_active(), ability_get_overclock_timer(), 'O', 'C' },
+            { ability_is_iron_skin_active(), ability_get_iron_skin_timer(), 'I', 'S' },
+            { ability_is_berserk_active(), ability_get_berserk_timer(), 'B', 'S' },
+            { ability_is_data_shield_active(), ability_get_data_shield_timer(), 'D', 'S' },
+            { ability_is_smoke_active(), ability_get_smoke_timer(), 'S', 'M' },
+            { ability_is_backstab_active(), ability_get_backstab_timer(), 'B', 'K' },
+            { ability_is_time_warp_active(), ability_get_time_warp_timer(), 'T', 'W' },
+            { ability_is_nanobots_active(), ability_get_nanobots_timer(), 'N', 'B' },
+        };
+        for (int e = 0; e < 8 && col < 10; e++) {
+            if (!efx[e].active) continue;
+            text_put_char(col, 2, efx[e].c0);
+            text_put_char(col + 1, 2, efx[e].c1);
+            int secs = (efx[e].timer + 59) / 60;
+            if (secs > 9) secs = 9;
+            text_put_char(col + 2, 2, (char)('0' + secs));
+            col += 4;
             col += 3;
         }
         if (ability_is_firewall_active() && col < 11) {
@@ -465,14 +454,16 @@ void hud_floattext_update(void) {
 }
 
 void hud_floattext_draw(void) {
-    /* Clear the floattext region (rows 4-12) before drawing to prevent ghost trails.
-     * Row 3 reserved for combo display, rows 13+ for dialogue. */
-    int any_active = 0;
+    /* Clear previous float positions (targeted clear instead of 270-tile blanket) */
     for (int i = 0; i < MAX_FLOATS; i++) {
-        if (floats[i].timer > 0) { any_active = 1; break; }
-    }
-    if (any_active) {
-        text_clear_rect(0, 4, 30, 9); /* rows 4-12 */
+        if (floats[i].prev_digits > 0 && floats[i].prev_sy >= 4 && floats[i].prev_sy <= 12) {
+            for (int d = 0; d < floats[i].prev_digits; d++) {
+                int cx = floats[i].prev_sx + d;
+                if (cx >= 0 && cx < 30)
+                    text_put_char(cx, floats[i].prev_sy, ' ');
+            }
+            floats[i].prev_digits = 0;
+        }
     }
 
     for (int i = 0; i < MAX_FLOATS; i++) {
@@ -486,8 +477,12 @@ void hud_floattext_draw(void) {
         /* Only draw in safe BG0 area (rows 4-12, cols 0-29) */
         if (sx < 0 || sx >= 28 || sy < 4 || sy > 12) continue;
 
-        /* Print the number */
+        /* Print the number with color: red=damage, green=heal, yellow=crit */
         int v = floats[i].value;
+        int pal_bits;
+        if (floats[i].value < 0) pal_bits = 0; /* green for heal (pal 0) */
+        else if (floats[i].is_crit) pal_bits = 1 << 12; /* amber/yellow for crit */
+        else pal_bits = 3 << 12; /* red for normal damage */
         if (v < 0) v = -v;
         if (v > 999) v = 999;
         /* Render digits right-to-left */
@@ -496,10 +491,16 @@ void hud_floattext_draw(void) {
         do { digits++; tmp /= 10; } while (tmp > 0);
         tmp = v;
         for (int d = digits - 1; d >= 0; d--) {
-            if (sx + d < 30 && sx + d >= 0)
-                text_put_char(sx + d, sy, (char)('0' + tmp % 10));
+            if (sx + d < 30 && sx + d >= 0) {
+                u16 tile = (u16)(('0' + tmp % 10 - ' ') | pal_bits);
+                ((u16*)se_mem[31])[(sy) * 32 + sx + d] = tile;
+            }
             tmp /= 10;
         }
+        /* Save position for targeted clear next frame */
+        floats[i].prev_sx = (s8)sx;
+        floats[i].prev_sy = (s8)sy;
+        floats[i].prev_digits = (u8)digits;
     }
 }
 

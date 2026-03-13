@@ -36,13 +36,11 @@ typedef struct {
     u8  equipped_idx;       /* Which inventory slot is equipped (1) */
     u8  inventory_count;    /* Number of items (1) */
     /* Shop */
-    u8  shop_purchases[6];  /* Purchase counts per item (6) */
-    /* Padding to align inventory */
-    u8  pad[1];             /* (1) — total header: 42 bytes */
+    u8  shop_purchases[9];  /* Purchase counts per item (9) */
     /* Inventory: 20 items x 8 bytes = 160 bytes */
     LootItem inventory[INVENTORY_SIZE]; /* (160) */
     /* Bug bounty persistence */
-    u16 bb_high_scores[5];  /* Per-tier high scores (10) */
+    u16 bb_high_scores[7];  /* Per-tier high scores (14) */
     u8  bb_highest_unlocked;/* Highest tier unlocked 0-4 (1) */
     u8  bb_total_runs;      /* Total completed runs (1) */
     /* Skill tree & evolution (Phase 1) */
@@ -72,9 +70,14 @@ typedef struct {
     u8  bb_threat_level;    /* Permanent difficulty scaling (1) */
     u8  bb_highest_level;   /* Highest player level reached (1) */
     u8  endgame_unlocked;   /* 1=endless mode available (1) */
-    /* Reserved for future use */
-    u8  reserved[222];      /* Pad to 512 total */
+    /* Reserved for future use — size accounts for compiler alignment padding:
+     * +1 byte before bb_high_scores (u16 at odd offset needs 2-byte align)
+     * +3 bytes before play_time_frames (u32 needs 4-byte align after u8[3]) */
+    u8  reserved[210];      /* Pad to 512 total (including implicit padding) */
 } SaveData;                 /* 512 bytes */
+
+_Static_assert(sizeof(SaveData) == SAVE_SLOT_SIZE,
+    "SaveData must equal SAVE_SLOT_SIZE (512). Adjust reserved[] if adding fields.");
 
 /* Write save data to a slot (0-2). */
 void save_write_slot(SaveData* data, int slot);

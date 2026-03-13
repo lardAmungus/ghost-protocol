@@ -50,6 +50,17 @@ static int inv_scroll;       /* Inventory scroll offset */
 static int save_slot;        /* Selected save slot (0-2) */
 static int save_msg_timer;   /* "Saved!" message timer */
 static int save_confirm;     /* 1=awaiting overwrite confirmation */
+
+/* Cached save slot previews — avoid SRAM reads every frame */
+static struct {
+    u8 exists;
+    u8 valid;
+    u8 player_class;
+    u8 player_level;
+    u8 quest_act;
+    u16 credits;
+} save_preview[SAVE_SLOTS];
+static int save_preview_dirty; /* 1=need to re-read from SRAM */
 static int help_page;        /* Selected topic index (0-8) */
 static int help_mode;        /* 0=topic index, 1=topic detail */
 static int last_dialogue_mission; /* Last dialogue shown (avoid re-showing) */
@@ -229,6 +240,12 @@ void state_terminal_reset(void) {
     initialized = 0;
 }
 
+void state_terminal_save_current(int slot) {
+    static EWRAM_BSS SaveData sd;
+    pack_save(&sd);
+    save_write_slot(&sd, slot);
+}
+
 void state_terminal_preload_slot(int slot) {
     static EWRAM_BSS SaveData sd;
     if (!save_read_slot(&sd, slot)) return;
@@ -388,6 +405,7 @@ static void update_main(void) {
             }
             if (c) {
                 sub_state = TSUB_BRIEFING;
+                cursor = 0;
                 text_clear_all();
             } else {
                 text_print(2, 17, "No contracts!");
@@ -398,6 +416,7 @@ static void update_main(void) {
             sub_state = TSUB_SAVE;
             save_slot = 0;
             save_confirm = 0;
+            save_preview_dirty = 1;
             text_clear_all();
             break;
         case TMENU_HELP:
@@ -557,6 +576,7 @@ static void update_save(void) {
             audio_play_sfx(SFX_SAVE);
             save_msg_timer = 60;
             save_confirm = 0;
+            save_preview_dirty = 1;
             text_clear_all();
         }
         if (input_hit(KEY_B)) {
@@ -599,6 +619,7 @@ static void update_save(void) {
             save_write_slot(&sd_save, save_slot);
             audio_play_sfx(SFX_SAVE);
             save_msg_timer = 60;
+            save_preview_dirty = 1;
             text_clear_all();
         }
     }
@@ -1054,7 +1075,10 @@ static void update_craft(void) {
                 /* Salvage: instant */
                 int shards = craft_salvage(real_idx);
                 if (shards > 0) {
-                    player_state.craft_shards += (u16)shards;
+                    {
+                        u32 total = (u32)player_state.craft_shards + (u32)shards;
+                        player_state.craft_shards = (total > 0xFFFF) ? (u16)0xFFFF : (u16)total;
+                    }
                     cursor = 0;
                     inv_scroll = 0;
                 } else {
@@ -1087,9 +1111,9 @@ static void draw_craft(void) {
     if (craft_mode == 0) {
         /* Main craft menu */
         static const char* const craft_opts[3] = {
-            "FUSE   (3 same rarity -> 1 better)",
+            "FUSE   (3 same -> 1 better)",
             "SALVAGE (break -> shards)",
-            "FORGE   (reroll stats, costs shards)",
+            "FORGE   (reroll, costs shards)",
         };
         for (int i = 0; i < 3; i++) {
             text_print(2, 4 + i * 2, (i == cursor) ? ">" : " ");
@@ -1873,7 +1897,26 @@ static void draw_inventory(void) {
     draw_status_bar();
 }
 
+static void refresh_save_previews(void) {
+    static EWRAM_BSS SaveData sd;
+    for (int i = 0; i < SAVE_SLOTS; i++) {
+        save_preview[i].exists = (u8)save_slot_exists(i);
+        if (save_preview[i].exists && save_read_slot(&sd, i)) {
+            save_preview[i].valid = 1;
+            save_preview[i].player_class = sd.player_class;
+            save_preview[i].player_level = sd.player_level;
+            save_preview[i].quest_act = sd.quest_act;
+            save_preview[i].credits = sd.credits;
+        } else {
+            save_preview[i].valid = 0;
+        }
+    }
+    save_preview_dirty = 0;
+}
+
 static void draw_save(void) {
+    if (save_preview_dirty) refresh_save_previews();
+
     terminal_print_pal(2, 1, ">> SAVE / LOAD <<", TPAL_AMBER);
 
     for (int i = 0; i < SAVE_SLOTS; i++) {
@@ -1883,18 +1926,16 @@ static void draw_save(void) {
         text_print(4, row, "Slot");
         text_print_int(9, row, i + 1);
 
-        if (save_slot_exists(i)) {
-            /* Preview: read slot header (EWRAM to avoid 512B on stack) */
-            static EWRAM_BSS SaveData sd;
-            if (save_read_slot(&sd, i)) {
+        if (save_preview[i].exists) {
+            if (save_preview[i].valid) {
                 static const char* const cn[] = { "ASL", "INF", "TEC" };
-                text_print(12, row, cn[sd.player_class % 3]);
+                text_print(12, row, cn[save_preview[i].player_class % 3]);
                 text_print(16, row, "Lv");
-                text_print_int(18, row, sd.player_level);
+                text_print_int(18, row, save_preview[i].player_level);
                 text_print(4, row + 1, "Act:");
-                text_print_int(9, row + 1, sd.quest_act);
+                text_print_int(9, row + 1, save_preview[i].quest_act);
                 text_print(12, row + 1, "Cr:");
-                text_print_int(15, row + 1, sd.credits);
+                text_print_int(15, row + 1, save_preview[i].credits);
             } else {
                 terminal_print_pal(12, row, "CORRUPTED", TPAL_RED);
             }
@@ -2177,7 +2218,7 @@ static void draw_bb_results(void) {
 
     /* Check if this is the new high score (complete() already stored it) */
     u16 hs = bugbounty_get_high_score(bb_state.tier);
-    if (bb_state.score >= hs && bb_state.score > 0) {
+    if (bb_state.score > hs && bb_state.score > 0) {
         text_print(4, 9, "** NEW HIGH SCORE! **");
     } else {
         text_print(4, 9, "Best:");

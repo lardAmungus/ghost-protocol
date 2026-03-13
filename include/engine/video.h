@@ -59,4 +59,8 @@ void video_flash_start(int flash_frames, int fade_frames);
 /* Update transition effects. Call once per frame. Returns 1 while active. */
 int video_transition_update(void);
 
+/* Reset all visual effects (shake, flash, transitions, mosaic, blend).
+ * Call on state transitions to prevent stale effects persisting. */
+void video_reset_effects(void);
+
 #endif /* ENGINE_VIDEO_H */

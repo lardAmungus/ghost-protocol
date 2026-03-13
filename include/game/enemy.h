@@ -86,4 +86,7 @@ void enemy_stun_all(int damage);
 int enemy_get_chase_count(void);
 void enemy_reset_chase_count(void);
 
+/* Set 60-frame grace period — enemies won't chase after area load. */
+void enemy_reset_grace_timer(void);
+
 #endif /* GAME_ENEMY_H */

@@ -15,6 +15,7 @@
 #include "engine/audio.h"
 #include "engine/video.h"
 #include "game/particle.h"
+#include "game/enemy.h"
 #include "engine/entity.h"
 #include <string.h>
 
@@ -309,6 +310,8 @@ void player_init(int player_class) {
     player_state.level = 1;
     player_state.state = PSTATE_IDLE;
     player_state.credits = 100;
+    selected_ability = 0;
+    coyote_timer = 0;
 
     /* Compute stats */
     compute_stats();
@@ -381,6 +384,9 @@ static void do_shoot(void) {
     } else {
         base_cooldown = 0; /* No weapon = use class default */
     }
+
+    /* Berserk (Assault ability): ATK x1.5 while active */
+    if (ability_is_berserk_active()) dmg = dmg * 3 / 2;
 
     /* Weapon type modifies projectile behavior */
     int wtype = weapon ? LOOT_SUBTYPE(weapon->type) : WEAPON_BUSTER;
@@ -517,11 +523,13 @@ static void do_shoot(void) {
 
     /* Weapon-type-specific SFX */
     switch (wtype) {
-    case WEAPON_BEAM:    audio_play_sfx(SFX_BEAM_HUM); break;
+    case WEAPON_BEAM:    audio_play_sfx(SFX_BEAM_FIRE); break;
     case WEAPON_SPREAD:  audio_play_sfx(SFX_SPREAD_BURST); break;
     case WEAPON_CHARGER: audio_play_sfx(SFX_CHARGER_WHINE); break;
-    case WEAPON_LASER:   audio_play_sfx(SFX_BEAM_HUM); break;
+    case WEAPON_LASER:   audio_play_sfx(SFX_LASER_CRACK); break;
     case WEAPON_RAPID:   audio_play_sfx(SFX_SHOOT_RAPID); break;
+    case WEAPON_HOMING:  audio_play_sfx(SFX_HOMING_WHINE); break;
+    case WEAPON_NOVA:    audio_play_sfx(SFX_NOVA_WHOOSH); break;
     default:             audio_play_sfx(SFX_SHOOT); break;
     }
 
@@ -786,11 +794,22 @@ void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
 
     /* Diminishing returns defense: actual = dmg * 256 / (256 + def * 8)
      * At DEF=16, reduces damage by ~33%. At DEF=32, ~50%. At DEF=64, ~67%. */
-    int def_factor = 256 + player_state.def * 8;
+    int def_val = player_state.def;
+    /* Iron Skin (Assault ability): DEF doubled while active */
+    if (ability_is_iron_skin_active()) def_val *= 2;
+    /* Berserk (Assault ability): DEF halved while active (tradeoff for ATK boost) */
+    if (ability_is_berserk_active()) def_val /= 2;
+    int def_factor = 256 + def_val * 8;
     int actual = dmg * 256 / def_factor;
     /* Data Shield (Technomancer ability): halve incoming damage */
     if (ability_is_data_shield_active()) {
         actual = actual / 2;
+    }
+    /* Firewall (Technomancer ability): absorb half, reflect to nearby enemies */
+    if (ability_is_firewall_active()) {
+        int reflected = actual / 2;
+        actual = actual - reflected;
+        if (reflected > 0) enemy_stun_all(reflected);
     }
     /* Skill tree: defense branch index 3 = resist (flat -1/-2/-3 damage) */
     actual -= player_state.skill_tree[7];

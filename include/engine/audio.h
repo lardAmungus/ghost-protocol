@@ -65,6 +65,16 @@ enum {
     SFX_CRAFT_SUCCESS  = 28,
     SFX_EVOLVE         = 29,
     SFX_ACHIEVEMENT    = 30,
+    /* Weapon-specific fire SFX (Phase 8A) */
+    SFX_BEAM_FIRE      = 31, /* Sustained beam hum */
+    SFX_LASER_CRACK    = 32, /* Sharp laser crack */
+    SFX_NOVA_WHOOSH    = 33, /* Expanding nova whoosh */
+    SFX_HOMING_WHINE   = 34, /* Homing missile engine */
+    /* Enemy variety SFX (Phase 8B) */
+    SFX_ENEMY_HIT_MECH = 35, /* Mechanical enemy hit (Turret/Drone) */
+    SFX_ENEMY_DIE_MECH = 36, /* Mechanical enemy death */
+    SFX_ENEMY_HIT_DIGI = 37, /* Digital enemy hit (Ghost/Mimic) */
+    SFX_ENEMY_DIE_DIGI = 38, /* Digital enemy death */
     SFX_COUNT
 };
 

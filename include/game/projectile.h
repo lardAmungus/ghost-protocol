@@ -22,7 +22,7 @@ typedef struct {
     u8  owner;         /* Entity pool index of owner */
     u8  oam_index;     /* OAM sprite index */
     u8  pad;
-    u16 hit_mask;      /* Bitmask of enemy slots already hit (piercing dedup) */
+    u32 hit_mask;      /* Bitmask: bits 0-23 = enemy slots, bit 31 = boss (piercing dedup) */
 } Projectile;
 
 /* Initialize the projectile pool. */

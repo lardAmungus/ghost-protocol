@@ -312,23 +312,11 @@ void state_charsel_update(void) {
             audio_play_sfx(SFX_MENU_SELECT);
         }
         if (input_hit(KEY_A)) {
-            /* Load save from selected slot (EWRAM to avoid 512B on stack) */
+            /* Load save from selected slot — preload restores ALL state
+             * (player, quest, inventory, skills, stats, shop, bounty) */
             int slot = cursor - 1;
-            static EWRAM_BSS SaveData sd;
-            if (save_read_slot(&sd, slot)) {
-                /* Restore player state from save */
-                player_state.player_class   = sd.player_class;
-                player_state.level          = sd.player_level;
-                player_state.hp             = sd.player_hp;
-                player_state.max_hp         = sd.player_max_hp;
-                player_state.xp             = sd.player_xp;
-                player_state.atk            = sd.player_atk;
-                player_state.def            = sd.player_def;
-                player_state.spd            = sd.player_spd;
-                player_state.lck            = sd.player_lck;
-                player_state.credits        = sd.credits;
-                player_state.ability_unlocks = sd.ability_unlocks;
-                /* Quest state restored in state_terminal_enter */
+            if (save_slot_exists(slot)) {
+                state_terminal_preload_slot(slot);
                 audio_play_sfx(SFX_MENU_SELECT);
                 fade_timer = FADE_FRAMES;
                 fade_target = STATE_TERMINAL;
@@ -362,15 +350,12 @@ void state_charsel_draw(void) {
 
     /* If in save mode, show save slot list on row 18+ */
     if (cursor > 0) {
-        /* Rebuild rows 18-19 as save file list */
-        text_clear_rect(0, 17, 30, 3);
-        draw_bar(17);
-        text_print(SEL_COL, 18, "LOAD SAVE SLOT:");
+        /* Show save slots on rows 16-19: header + 3 slots */
+        text_clear_rect(0, 16, 30, 4);
+        draw_bar(16);
         for (int s = 0; s < SAVE_SLOTS; s++) {
-            int row = 18 + s;
-            if (row > 19) break;
+            int row = 17 + s;
             int slot_sel = (cursor - 1 == s);
-            text_clear_rect(0, row, 30, 1);
             text_put_char(0, row, slot_sel ? '>' : ' ');
             text_print(2, row, "SLOT");
             text_put_char(7, row, (char)('0' + s + 1));

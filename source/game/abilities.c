@@ -28,12 +28,12 @@ static const char* const technomancer_names[AB_SLOT_COUNT] = {
 };
 
 static const int assault_cd[AB_SLOT_COUNT] = {
-    AB_CD_SHORT, AB_CD_MEDIUM, AB_CD_LONG, AB_CD_ULTRA,
-    AB_CD_LONG, AB_CD_MEDIUM, AB_CD_LONG, AB_CD_MEDIUM
+    AB_CD_SHORT, 108, AB_CD_LONG, AB_CD_ULTRA,         /* -10% on Power Shot (offensive) */
+    AB_CD_LONG, 108, AB_CD_LONG, 108                    /* -10% on Iron Skin, Berserk */
 };
 static const int infiltrator_cd[AB_SLOT_COUNT] = {
     AB_CD_SHORT, AB_CD_SHORT, AB_CD_LONG, AB_CD_ULTRA,
-    AB_CD_MEDIUM, AB_CD_SHORT, AB_CD_LONG, AB_CD_LONG
+    108, AB_CD_SHORT, AB_CD_LONG, AB_CD_LONG            /* -10% on Smoke Bomb (mobility) */
 };
 static const int technomancer_cd[AB_SLOT_COUNT] = {
     AB_CD_MEDIUM, AB_CD_SHORT, AB_CD_MEDIUM, AB_CD_ULTRA,
@@ -479,3 +479,13 @@ int ability_is_overclock_plus_active(void) {
 int ability_is_upload_active(void) {
     return upload_timer > 0;
 }
+
+/* Timer getters for HUD status display */
+int ability_get_overclock_timer(void) { return overclock_timer; }
+int ability_get_iron_skin_timer(void) { return iron_skin_timer; }
+int ability_get_berserk_timer(void) { return berserk_timer; }
+int ability_get_data_shield_timer(void) { return data_shield_timer; }
+int ability_get_smoke_timer(void) { return smoke_timer; }
+int ability_get_backstab_timer(void) { return backstab_timer; }
+int ability_get_time_warp_timer(void) { return time_warp_timer; }
+int ability_get_nanobots_timer(void) { return nanobots_timer; }

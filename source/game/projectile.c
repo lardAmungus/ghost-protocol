@@ -233,6 +233,7 @@ Projectile* projectile_spawn(s32 x, s32 y, s16 vx, s16 vy,
             pool[i].lifetime = 150; /* 2.5 seconds default */
             pool[i].owner = owner;
             pool[i].oam_index = (u8)oam;
+            pool[i].hit_mask = 0; /* Clear piercing dedup mask from previous occupant */
 
             /* Configure OAM sprite — select tile variant by subtype */
             OBJ_ATTR* spr = sprite_get(oam);
@@ -300,11 +301,11 @@ void projectile_update_all(void) {
             if (find_nearest_enemy(p->x, p->y, &tx, &ty)) {
                 int dx = (int)((tx - p->x) >> 8);
                 int dy = (int)((ty - p->y) >> 8);
-                /* Adjust velocity toward target (gradual curve, ±16/frame) */
-                if (dx > 0 && p->vx < 384) p->vx += 16;
-                else if (dx < 0 && p->vx > -384) p->vx -= 16;
-                if (dy > 0 && p->vy < 384) p->vy += 16;
-                else if (dy < 0 && p->vy > -384) p->vy -= 16;
+                /* Adjust velocity toward target (gradual curve, ±24/frame) */
+                if (dx > 0 && p->vx < 448) p->vx += 24;
+                else if (dx < 0 && p->vx > -448) p->vx -= 24;
+                if (dy > 0 && p->vy < 448) p->vy += 24;
+                else if (dy < 0 && p->vy > -448) p->vy -= 24;
             }
         }
 
@@ -314,6 +315,30 @@ void projectile_update_all(void) {
              * Already has PIERCE behavior. Reduce lifetime fast. */
             p->vx = 0;
             p->vy = 0;
+        }
+
+        /* Per-weapon velocity modifiers */
+        if (!(p->flags & PROJ_ENEMY)) {
+            switch (p->type) {
+            case SUBTYPE_PROJ_RAPID:
+                /* Slight deceleration — trails off at range */
+                p->vx = (s16)(p->vx * 95 / 100);
+                break;
+            case SUBTYPE_PROJ_LASER:
+                /* Accelerates to max speed quickly */
+                if (p->vx > 0 && p->vx < 512) p->vx += 32;
+                else if (p->vx < 0 && p->vx > -512) p->vx -= 32;
+                break;
+            case SUBTYPE_PROJ_HOMING:
+                /* Stronger curve rate (handled above, but cap speed) */
+                if (p->vx > 448) p->vx = 448;
+                if (p->vx < -448) p->vx = -448;
+                if (p->vy > 448) p->vy = 448;
+                if (p->vy < -448) p->vy = -448;
+                break;
+            default:
+                break;
+            }
         }
 
         /* Move */

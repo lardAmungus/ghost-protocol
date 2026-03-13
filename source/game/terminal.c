@@ -158,9 +158,9 @@ static const u32 circuit_tiles[6][8] = {
 };
 
 void terminal_load_bg(void) {
-    /* Load circuit tiles into CBB1 (tile_mem[1]) */
+    /* Load circuit tiles into CBB1 (tile_mem[1]) — must use 16-bit writes for VRAM */
     for (int t = 0; t < 6; t++) {
-        memcpy(&tile_mem[1][t], circuit_tiles[t], 32);
+        memcpy16(&tile_mem[1][t], circuit_tiles[t], 32 / 2);
     }
 
     /* Set up BG1 palette (bank 4): dark BG + dim green traces */

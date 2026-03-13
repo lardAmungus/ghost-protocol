@@ -34,6 +34,13 @@ static void set_tile(int tx, int ty, int visual, int col) {
     level_data.collision[idx] = (u8)col;
 }
 
+/* Visual-only tile — changes appearance without touching collision.
+ * Used for wall/floor decorations so solid tiles stay solid. */
+static void set_visual_tile(int tx, int ty, int visual) {
+    if (tx < 0 || tx >= NET_MAP_W || ty < 0 || ty >= NET_MAP_H) return;
+    level_data.tiles[ty * NET_MAP_W + tx] = (u8)visual;
+}
+
 static void fill_solid(int x0, int y0, int w, int h) {
     for (int y = y0; y < y0 + h && y < NET_MAP_H; y++) {
         for (int x = x0; x < x0 + w && x < NET_MAP_W; x++) {
@@ -109,52 +116,52 @@ static void gen_flat(int sect_x, int tier) {
     /* Sub-variant specific decorations */
     if (variant == 0) {
         /* Data corridor: circuit floors, data streams, glitch artifacts */
-        set_tile(sect_x + 4 + lrng_range(8), floor_y, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-        set_tile(sect_x + 2 + lrng_range(6), floor_y, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-        set_tile(sect_x + 3 + lrng_range(10), 8 + lrng_range(8), NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 1 + lrng_range(14), 6 + lrng_range(6), NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 5 + lrng_range(6), 4, NTILE_CABLE_H, TILE_EMPTY);
+        set_visual_tile(sect_x + 4 + lrng_range(8), floor_y, NTILE_FLOOR_CIRCUIT);
+        set_visual_tile(sect_x + 2 + lrng_range(6), floor_y, NTILE_FLOOR_CIRCUIT);
+        set_visual_tile(sect_x + 3 + lrng_range(10), 8 + lrng_range(8), NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 1 + lrng_range(14), 6 + lrng_range(6), NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 5 + lrng_range(6), 4, NTILE_CABLE_H);
         if (lrng_range(2) == 0) {
-            set_tile(sect_x + 3 + lrng_range(10), 5 + lrng_range(8), NTILE_GLITCH, TILE_EMPTY);
+            set_visual_tile(sect_x + 3 + lrng_range(10), 5 + lrng_range(8), NTILE_GLITCH);
         }
         if (lrng_range(2) == 0) {
-            set_tile(sect_x + 7 + lrng_range(4), 10 + lrng_range(6), NTILE_GLITCH, TILE_EMPTY);
+            set_visual_tile(sect_x + 7 + lrng_range(4), 10 + lrng_range(6), NTILE_GLITCH);
         }
-        set_tile(sect_x + 2 + lrng_range(12), 3, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+        set_visual_tile(sect_x + 2 + lrng_range(12), 3, NTILE_CIRCUIT_NODE);
     } else if (variant == 1) {
         /* Server room: server racks, screens, junction boxes */
-        set_tile(sect_x + 2, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 2, 5, NTILE_SERVER_BOT, TILE_EMPTY);
-        set_tile(sect_x + 12, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 12, 5, NTILE_SERVER_BOT, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, 4, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 2, 5, NTILE_SERVER_BOT);
+        set_visual_tile(sect_x + 12, 4, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 12, 5, NTILE_SERVER_BOT);
         if (lrng_range(2) == 0) {
-            set_tile(sect_x + 7, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-            set_tile(sect_x + 7, 5, NTILE_SERVER_BOT, TILE_EMPTY);
+            set_visual_tile(sect_x + 7, 4, NTILE_SERVER_TOP);
+            set_visual_tile(sect_x + 7, 5, NTILE_SERVER_BOT);
         }
-        set_tile(sect_x + 4 + lrng_range(4), 3, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 9 + lrng_range(4), 3, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 1, 6, NTILE_JUNCTION_BOX, TILE_EMPTY);
-        set_tile(sect_x + 14, 6, NTILE_JUNCTION_BOX, TILE_EMPTY);
-        set_tile(sect_x + 5 + lrng_range(6), floor_y, NTILE_FLOOR_GRATE, TILE_SOLID);
+        set_visual_tile(sect_x + 4 + lrng_range(4), 3, NTILE_SCREEN);
+        set_visual_tile(sect_x + 9 + lrng_range(4), 3, NTILE_SCREEN);
+        set_visual_tile(sect_x + 1, 6, NTILE_JUNCTION_BOX);
+        set_visual_tile(sect_x + 14, 6, NTILE_JUNCTION_BOX);
+        set_visual_tile(sect_x + 5 + lrng_range(6), floor_y, NTILE_FLOOR_GRATE);
     } else {
         /* Maintenance tunnel: pipes, vents, broken panels, conduits */
-        set_tile(sect_x + 1 + lrng_range(6), 3, NTILE_PIPE_H, TILE_EMPTY);
-        set_tile(sect_x + 8 + lrng_range(6), 3, NTILE_PIPE_H, TILE_EMPTY);
-        set_tile(sect_x + 4 + lrng_range(8), 4, NTILE_VENT, TILE_EMPTY);
+        set_visual_tile(sect_x + 1 + lrng_range(6), 3, NTILE_PIPE_H);
+        set_visual_tile(sect_x + 8 + lrng_range(6), 3, NTILE_PIPE_H);
+        set_visual_tile(sect_x + 4 + lrng_range(8), 4, NTILE_VENT);
         for (int pv = 5; pv < floor_y - 4; pv += 3 + lrng_range(2)) {
-            set_tile(sect_x + 1, pv, NTILE_PIPE_V, TILE_EMPTY);
-            set_tile(sect_x + 14, pv, NTILE_PIPE_V, TILE_EMPTY);
+            set_visual_tile(sect_x + 1, pv, NTILE_PIPE_V);
+            set_visual_tile(sect_x + 14, pv, NTILE_PIPE_V);
         }
-        set_tile(sect_x + 3 + lrng_range(10), 8 + lrng_range(6), NTILE_BROKEN_PANEL, TILE_EMPTY);
-        set_tile(sect_x + 2 + lrng_range(12), 6 + lrng_range(4), NTILE_CONDUIT, TILE_EMPTY);
-        set_tile(sect_x + 3 + lrng_range(10), floor_y, NTILE_FLOOR_CRACKED, TILE_SOLID);
-        set_tile(sect_x + 7 + lrng_range(4), floor_y, NTILE_FLOOR_CRACKED, TILE_SOLID);
+        set_visual_tile(sect_x + 3 + lrng_range(10), 8 + lrng_range(6), NTILE_BROKEN_PANEL);
+        set_visual_tile(sect_x + 2 + lrng_range(12), 6 + lrng_range(4), NTILE_CONDUIT);
+        set_visual_tile(sect_x + 3 + lrng_range(10), floor_y, NTILE_FLOOR_CRACKED);
+        set_visual_tile(sect_x + 7 + lrng_range(4), floor_y, NTILE_FLOOR_CRACKED);
     }
 
     /* Common background decoration — guaranteed */
-    set_tile(sect_x + 2 + lrng_range(12), 3, NTILE_CORRIDOR_GREEBLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 2 + lrng_range(12), 3, NTILE_CORRIDOR_GREEBLE);
     if (lrng_range(2) == 0) {
-        set_tile(sect_x + 2 + lrng_range(12), 10 + lrng_range(8), NTILE_MEMORY_BANK, TILE_EMPTY);
+        set_visual_tile(sect_x + 2 + lrng_range(12), 10 + lrng_range(8), NTILE_MEMORY_BANK);
     }
 }
 
@@ -196,12 +203,12 @@ static void gen_platforms(int sect_x, int tier) {
         }
         /* Decoration below platform: server rack or circuit node */
         if (py + 2 < 30 && lrng_range(2) == 0) {
-            set_tile(px + 1, py + 2, NTILE_SERVER_TOP, TILE_EMPTY);
+            set_visual_tile(px + 1, py + 2, NTILE_SERVER_TOP);
             if (py + 3 < 30) {
-                set_tile(px + 1, py + 3, NTILE_SERVER_BOT, TILE_EMPTY);
+                set_visual_tile(px + 1, py + 3, NTILE_SERVER_BOT);
             }
         } else if (py + 2 < 30 && lrng_range(2) == 0) {
-            set_tile(px + 1, py + 2, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+            set_visual_tile(px + 1, py + 2, NTILE_CIRCUIT_NODE);
         }
         prev_py = py;
         px += pw + 1 + lrng_range(2);
@@ -210,37 +217,37 @@ static void gen_platforms(int sect_x, int tier) {
 
     /* Rich decoration below and around platforms */
     /* Data streams flowing between platforms */
-    set_tile(sect_x + 4 + lrng_range(4), 28, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 9 + lrng_range(4), 28, NTILE_DATA_STREAM, TILE_EMPTY);
+    set_visual_tile(sect_x + 4 + lrng_range(4), 28, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 9 + lrng_range(4), 28, NTILE_DATA_STREAM);
 
     /* Vertical cables hanging from ceiling */
     {
         int c1 = sect_x + 3 + lrng_range(4);
         int c2 = sect_x + 9 + lrng_range(4);
         for (int cy = 3; cy < 10 + lrng_range(6); cy++)
-            set_tile(c1, cy, NTILE_CABLE_V, TILE_EMPTY);
+            set_visual_tile(c1, cy, NTILE_CABLE_V);
         for (int cy = 3; cy < 8 + lrng_range(6); cy++)
-            set_tile(c2, cy, NTILE_CABLE_V, TILE_EMPTY);
+            set_visual_tile(c2, cy, NTILE_CABLE_V);
     }
 
     /* Ceiling pipe runs */
     for (int cpx = sect_x + 2; cpx < sect_x + 14; cpx += 4 + lrng_range(2))
-        set_tile(cpx, 3, NTILE_PIPE_H, TILE_EMPTY);
+        set_visual_tile(cpx, 3, NTILE_PIPE_H);
 
     /* Neon sign */
     if (lrng_range(2) == 0)
-        set_tile(sect_x + 6 + lrng_range(4), 4, NTILE_NEON_SIGN, TILE_EMPTY);
+        set_visual_tile(sect_x + 6 + lrng_range(4), 4, NTILE_NEON_SIGN);
 
     /* Floor grate */
-    set_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE);
 
     /* Broken panel at ground level */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 2 + lrng_range(12), 29, NTILE_BROKEN_PANEL, TILE_EMPTY);
+        set_visual_tile(sect_x + 2 + lrng_range(12), 29, NTILE_BROKEN_PANEL);
 
     /* Glitch artifact */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 3 + lrng_range(10), 20 + lrng_range(6), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 3 + lrng_range(10), 20 + lrng_range(6), NTILE_GLITCH);
 
     if (tier > 3) {
         add_hazard(sect_x + 3 + lrng_range(10), 29);
@@ -266,12 +273,12 @@ static void gen_vertical(int sect_x, int tier) {
 
     /* Shaft rivets on walls */
     for (int r = 4; r < 28; r += 4) {
-        set_tile(sect_x + 1, r, NTILE_SHAFT_RIVET, TILE_SOLID);
-        set_tile(sect_x + 14, r, NTILE_SHAFT_RIVET, TILE_SOLID);
+        set_visual_tile(sect_x + 1, r, NTILE_SHAFT_RIVET);
+        set_visual_tile(sect_x + 14, r, NTILE_SHAFT_RIVET);
     }
     /* Descent rails */
-    set_tile(sect_x + 2, 4, NTILE_DESCENT_RAIL, TILE_EMPTY);
-    set_tile(sect_x + 13, 4, NTILE_DESCENT_RAIL, TILE_EMPTY);
+    set_visual_tile(sect_x + 2, 4, NTILE_DESCENT_RAIL);
+    set_visual_tile(sect_x + 13, 4, NTILE_DESCENT_RAIL);
 
     /* Extend floor to full width (including under wall openings) */
     fill_floor(sect_x, 30, 16);
@@ -292,41 +299,41 @@ static void gen_vertical(int sect_x, int tier) {
 
     /* Pipe runs along both walls */
     for (int r = 3; r < 28; r++) {
-        set_tile(sect_x + 2, r, NTILE_PIPE_V, TILE_EMPTY);
-        set_tile(sect_x + 13, r, NTILE_PIPE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, r, NTILE_PIPE_V);
+        set_visual_tile(sect_x + 13, r, NTILE_PIPE_V);
     }
 
     /* Wall-mounted screens at intervals */
-    set_tile(sect_x + 1, 8, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 14, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 20, NTILE_SCREEN, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 8, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 14, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 20, NTILE_SCREEN);
 
     /* Junction boxes at pipe joints */
-    set_tile(sect_x + 2, 10, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 13, 18, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 2, 10, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 13, 18, NTILE_JUNCTION_BOX);
 
     /* Memory banks recessed in walls */
-    set_tile(sect_x + 1, 12, NTILE_MEMORY_BANK, TILE_EMPTY);
-    set_tile(sect_x + 14, 22, NTILE_MEMORY_BANK, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 12, NTILE_MEMORY_BANK);
+    set_visual_tile(sect_x + 14, 22, NTILE_MEMORY_BANK);
 
     /* Data streams in open shaft space */
     if (lrng_range(2) == 0) {
         int ds_x = sect_x + 6 + lrng_range(4);
         for (int dy = 5; dy < 16; dy += 3)
-            set_tile(ds_x, dy, NTILE_DATA_STREAM, TILE_EMPTY);
+            set_visual_tile(ds_x, dy, NTILE_DATA_STREAM);
     }
 
     /* Broken panels near base */
-    set_tile(sect_x + 3, 28, NTILE_BROKEN_PANEL, TILE_EMPTY);
-    set_tile(sect_x + 12, 28, NTILE_BROKEN_PANEL, TILE_EMPTY);
+    set_visual_tile(sect_x + 3, 28, NTILE_BROKEN_PANEL);
+    set_visual_tile(sect_x + 12, 28, NTILE_BROKEN_PANEL);
 
     /* Floor details */
-    set_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
-    set_tile(sect_x + 8, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE);
+    set_visual_tile(sect_x + 8, 30, NTILE_FLOOR_GRATE);
 
     /* Glitch artifact in shaft */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 5 + lrng_range(6), 8 + lrng_range(10), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 5 + lrng_range(6), 8 + lrng_range(10), NTILE_GLITCH);
 
     if (tier > 2) {
         add_hazard(sect_x + 7, 29);
@@ -341,7 +348,7 @@ static void gen_arena(int sect_x, int tier) {
     fill_solid(sect_x, 0, 16, 2);
     /* Arena border on ceiling */
     for (int x = sect_x; x < sect_x + 16 && x < NET_MAP_W; x++) {
-        set_tile(x, 2, NTILE_ARENA_BORDER, TILE_SOLID);
+        set_visual_tile(x, 2, NTILE_ARENA_BORDER);
     }
     /* Walls on sides with wall caps */
     fill_solid(sect_x, 3, 1, 25);
@@ -395,26 +402,26 @@ static void gen_arena(int sect_x, int tier) {
     {
         int deco = lrng_range(3);
         if (deco == 0) {
-            set_tile(sect_x + 1, 10, NTILE_SCREEN, TILE_EMPTY);
-            set_tile(sect_x + 14, 16, NTILE_SCREEN, TILE_EMPTY);
-            set_tile(sect_x + 1, 24, NTILE_JUNCTION_BOX, TILE_EMPTY);
-            set_tile(sect_x + 14, 24, NTILE_JUNCTION_BOX, TILE_EMPTY);
+            set_visual_tile(sect_x + 1, 10, NTILE_SCREEN);
+            set_visual_tile(sect_x + 14, 16, NTILE_SCREEN);
+            set_visual_tile(sect_x + 1, 24, NTILE_JUNCTION_BOX);
+            set_visual_tile(sect_x + 14, 24, NTILE_JUNCTION_BOX);
         } else if (deco == 1) {
-            set_tile(sect_x + 1, 8, NTILE_SERVER_TOP, TILE_EMPTY);
-            set_tile(sect_x + 1, 9, NTILE_SERVER_BOT, TILE_EMPTY);
-            set_tile(sect_x + 14, 14, NTILE_SERVER_TOP, TILE_EMPTY);
-            set_tile(sect_x + 14, 15, NTILE_SERVER_BOT, TILE_EMPTY);
-            set_tile(sect_x + 1, 20, NTILE_DATA_STREAM, TILE_EMPTY);
-            set_tile(sect_x + 14, 20, NTILE_DATA_STREAM, TILE_EMPTY);
+            set_visual_tile(sect_x + 1, 8, NTILE_SERVER_TOP);
+            set_visual_tile(sect_x + 1, 9, NTILE_SERVER_BOT);
+            set_visual_tile(sect_x + 14, 14, NTILE_SERVER_TOP);
+            set_visual_tile(sect_x + 14, 15, NTILE_SERVER_BOT);
+            set_visual_tile(sect_x + 1, 20, NTILE_DATA_STREAM);
+            set_visual_tile(sect_x + 14, 20, NTILE_DATA_STREAM);
         } else {
-            set_tile(sect_x + 1, 10, NTILE_BROKEN_PANEL, TILE_EMPTY);
-            set_tile(sect_x + 14, 12, NTILE_BROKEN_PANEL, TILE_EMPTY);
-            set_tile(sect_x + 1, 16, NTILE_CONDUIT, TILE_EMPTY);
-            set_tile(sect_x + 14, 18, NTILE_CONDUIT, TILE_EMPTY);
+            set_visual_tile(sect_x + 1, 10, NTILE_BROKEN_PANEL);
+            set_visual_tile(sect_x + 14, 12, NTILE_BROKEN_PANEL);
+            set_visual_tile(sect_x + 1, 16, NTILE_CONDUIT);
+            set_visual_tile(sect_x + 14, 18, NTILE_CONDUIT);
         }
     }
     if (lrng_range(2) == 0) {
-        set_tile(sect_x + 6 + lrng_range(4), 3, NTILE_NEON_SIGN, TILE_EMPTY);
+        set_visual_tile(sect_x + 6 + lrng_range(4), 3, NTILE_NEON_SIGN);
     }
 
     /* Entry/exit openings in side walls (3 tiles high, at floor level) */
@@ -472,7 +479,7 @@ static void gen_corridor(int sect_x, int tier) {
 
     if (variant == 0) {
         /* Hazard gauntlet: many floor hazards, sparse decoration */
-        set_tile(sect_x + 7, 28, NTILE_FLOOR_GRATE, TILE_SOLID);
+        set_visual_tile(sect_x + 7, 28, NTILE_FLOOR_GRATE);
         /* Hazard rows — mix spikes and tesla coils */
         int num_hazards = tier;
         if (num_hazards > 5) num_hazards = 5;
@@ -485,12 +492,12 @@ static void gen_corridor(int sect_x, int tier) {
             }
         }
         /* Corridor greeble on ceiling walls */
-        set_tile(sect_x + 3, 8, NTILE_CORRIDOR_GREEBLE, TILE_EMPTY);
-        set_tile(sect_x + 10, 8, NTILE_CORRIDOR_GREEBLE, TILE_EMPTY);
-        set_tile(sect_x + 1, 8, NTILE_PIPE_H, TILE_EMPTY);
-        set_tile(sect_x + 14, 8, NTILE_PIPE_H, TILE_EMPTY);
+        set_visual_tile(sect_x + 3, 8, NTILE_CORRIDOR_GREEBLE);
+        set_visual_tile(sect_x + 10, 8, NTILE_CORRIDOR_GREEBLE);
+        set_visual_tile(sect_x + 1, 8, NTILE_PIPE_H);
+        set_visual_tile(sect_x + 14, 8, NTILE_PIPE_H);
         if (lrng_range(2) == 0) {
-            set_tile(sect_x + 6 + lrng_range(4), 8, NTILE_VENT, TILE_EMPTY);
+            set_visual_tile(sect_x + 6 + lrng_range(4), 8, NTILE_VENT);
         }
     } else {
         /* Cable drip tunnel: hanging cables, data waterfalls, dense pipes */
@@ -498,22 +505,22 @@ static void gen_corridor(int sect_x, int tier) {
         for (int cx = sect_x + 2; cx < sect_x + 14; cx += 2 + lrng_range(3)) {
             int cable_len = 4 + lrng_range(6);
             for (int cy = 8; cy < 8 + cable_len && cy < 22; cy++) {
-                set_tile(cx, cy, NTILE_CABLE_V, TILE_EMPTY);
+                set_visual_tile(cx, cy, NTILE_CABLE_V);
             }
         }
         /* Data waterfalls between cables */
-        set_tile(sect_x + 5 + lrng_range(6), 10 + lrng_range(4), NTILE_DATA_WATERFALL, TILE_EMPTY);
-        set_tile(sect_x + 3 + lrng_range(10), 14 + lrng_range(4), NTILE_DATA_WATERFALL, TILE_EMPTY);
+        set_visual_tile(sect_x + 5 + lrng_range(6), 10 + lrng_range(4), NTILE_DATA_WATERFALL);
+        set_visual_tile(sect_x + 3 + lrng_range(10), 14 + lrng_range(4), NTILE_DATA_WATERFALL);
         /* Pipe network on ceiling */
         for (int px = sect_x + 1; px < sect_x + 15; px += 3 + lrng_range(2)) {
-            set_tile(px, 8, NTILE_PIPE_H, TILE_EMPTY);
+            set_visual_tile(px, 8, NTILE_PIPE_H);
         }
         /* Fewer floor hazards but cracked floor */
         if (tier > 2) {
             add_hazard(sect_x + 4 + lrng_range(8), 27);
         }
-        set_tile(sect_x + 3 + lrng_range(5), 28, NTILE_FLOOR_CRACKED, TILE_SOLID);
-        set_tile(sect_x + 9 + lrng_range(5), 28, NTILE_FLOOR_CRACKED, TILE_SOLID);
+        set_visual_tile(sect_x + 3 + lrng_range(5), 28, NTILE_FLOOR_CRACKED);
+        set_visual_tile(sect_x + 9 + lrng_range(5), 28, NTILE_FLOOR_CRACKED);
     }
 
     /* Breakable block obstacle */
@@ -523,7 +530,7 @@ static void gen_corridor(int sect_x, int tier) {
     }
     /* Glitch artifact decoration */
     if (lrng_range(2) == 0) {
-        set_tile(sect_x + 3 + lrng_range(10), 12 + lrng_range(8), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 3 + lrng_range(10), 12 + lrng_range(8), NTILE_GLITCH);
     }
 }
 
@@ -536,11 +543,11 @@ static void gen_descent(int sect_x, int tier) {
 
     /* Descent rails on sides with pipe runs */
     for (int r = 3; r < 28; r++) {
-        set_tile(sect_x, r, NTILE_DESCENT_RAIL, TILE_EMPTY);
-        set_tile(sect_x + 15, r, NTILE_DESCENT_RAIL, TILE_EMPTY);
+        set_visual_tile(sect_x, r, NTILE_DESCENT_RAIL);
+        set_visual_tile(sect_x + 15, r, NTILE_DESCENT_RAIL);
         if (r > 5 && r < 26) {
-            set_tile(sect_x + 1, r, NTILE_PIPE_V, TILE_EMPTY);
-            set_tile(sect_x + 14, r, NTILE_PIPE_V, TILE_EMPTY);
+            set_visual_tile(sect_x + 1, r, NTILE_PIPE_V);
+            set_visual_tile(sect_x + 14, r, NTILE_PIPE_V);
         }
     }
 
@@ -556,7 +563,7 @@ static void gen_descent(int sect_x, int tier) {
         }
         /* Data waterfall between platforms */
         if (y > 10 && lrng_range(2) == 0) {
-            set_tile(sect_x + 7, y + 1, NTILE_DATA_WATERFALL, TILE_EMPTY);
+            set_visual_tile(sect_x + 7, y + 1, NTILE_DATA_WATERFALL);
         }
         y += 3 + lrng_range(2);
         side = 1 - side;
@@ -577,35 +584,35 @@ static void gen_descent(int sect_x, int tier) {
 
     /* Cable runs between platforms */
     for (int r = 10; r < 26; r += 4) {
-        set_tile(sect_x + 7, r, NTILE_CABLE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 7, r, NTILE_CABLE_V);
     }
 
     /* Wall-mounted screens at descent checkpoints */
-    set_tile(sect_x + 1, 8, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 16, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 24, NTILE_SCREEN, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 8, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 16, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 24, NTILE_SCREEN);
 
     /* Junction boxes on pipe runs */
-    set_tile(sect_x + 1, 12, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 20, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 12, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 20, NTILE_JUNCTION_BOX);
 
     /* Console at bottom */
-    set_tile(sect_x + 4, 29, NTILE_CONSOLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 4, 29, NTILE_CONSOLE);
 
     /* Broken panels showing wear */
-    set_tile(sect_x + 1, 18, NTILE_BROKEN_PANEL, TILE_EMPTY);
-    set_tile(sect_x + 14, 10, NTILE_BROKEN_PANEL, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 18, NTILE_BROKEN_PANEL);
+    set_visual_tile(sect_x + 14, 10, NTILE_BROKEN_PANEL);
 
     /* Floor circuit traces at bottom */
-    set_tile(sect_x + 5, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 10, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 5, 30, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 10, 30, NTILE_FLOOR_CIRCUIT);
 
     /* Floor grate */
-    set_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 7, 30, NTILE_FLOOR_GRATE);
 
     /* Glitch near data waterfalls */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 6, 14 + lrng_range(8), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 6, 14 + lrng_range(8), NTILE_GLITCH);
 }
 
 static void gen_maze(int sect_x, int tier) {
@@ -638,48 +645,48 @@ static void gen_maze(int sect_x, int tier) {
 
     /* Dense decoration: circuit nodes, server racks, cables */
     /* Circuit nodes at all path junctions */
-    set_tile(sect_x + 3, 6, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 12, 6, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 3, 14, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 12, 14, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 7, 21, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+    set_visual_tile(sect_x + 3, 6, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 12, 6, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 3, 14, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 12, 14, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 7, 21, NTILE_CIRCUIT_NODE);
 
     /* Server racks in open spaces between paths */
-    set_tile(sect_x + 1, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-    set_tile(sect_x + 1, 5, NTILE_SERVER_BOT, TILE_EMPTY);
-    set_tile(sect_x + 14, 12, NTILE_SERVER_TOP, TILE_EMPTY);
-    set_tile(sect_x + 14, 13, NTILE_SERVER_BOT, TILE_EMPTY);
-    set_tile(sect_x + 1, 20, NTILE_SERVER_TOP, TILE_EMPTY);
-    set_tile(sect_x + 1, 21, NTILE_SERVER_BOT, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 4, NTILE_SERVER_TOP);
+    set_visual_tile(sect_x + 1, 5, NTILE_SERVER_BOT);
+    set_visual_tile(sect_x + 14, 12, NTILE_SERVER_TOP);
+    set_visual_tile(sect_x + 14, 13, NTILE_SERVER_BOT);
+    set_visual_tile(sect_x + 1, 20, NTILE_SERVER_TOP);
+    set_visual_tile(sect_x + 1, 21, NTILE_SERVER_BOT);
 
     /* Vertical cables between path layers */
     for (int cy = paths[0] + 1; cy < paths[1]; cy++)
-        set_tile(sect_x + 4, cy, NTILE_CABLE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 4, cy, NTILE_CABLE_V);
     for (int cy = paths[1] + 1; cy < paths[2]; cy++)
-        set_tile(sect_x + 11, cy, NTILE_CABLE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 11, cy, NTILE_CABLE_V);
 
     /* Horizontal pipes along path ceilings */
     for (int px = sect_x + 3; px < sect_x + 13; px += 4)
-        set_tile(px, paths[0] - 2, NTILE_PIPE_H, TILE_EMPTY);
+        set_visual_tile(px, paths[0] - 2, NTILE_PIPE_H);
 
     /* Screens and consoles */
-    set_tile(sect_x + 14, 6, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 14, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 6, 27, NTILE_CONSOLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 14, 6, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 14, NTILE_SCREEN);
+    set_visual_tile(sect_x + 6, 27, NTILE_CONSOLE);
 
     /* Data streams in corridors */
-    set_tile(sect_x + 6, paths[0] - 1, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 10, paths[1] - 1, NTILE_DATA_STREAM, TILE_EMPTY);
+    set_visual_tile(sect_x + 6, paths[0] - 1, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 10, paths[1] - 1, NTILE_DATA_STREAM);
 
     /* Floor details */
-    set_tile(sect_x + 4, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 11, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 4, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 11, 28, NTILE_FLOOR_CIRCUIT);
 
     /* Neon sign in top open space */
-    set_tile(sect_x + 7, 4, NTILE_NEON_SIGN, TILE_EMPTY);
+    set_visual_tile(sect_x + 7, 4, NTILE_NEON_SIGN);
 
     /* Memory banks */
-    set_tile(sect_x + 14, 20, NTILE_MEMORY_BANK, TILE_EMPTY);
+    set_visual_tile(sect_x + 14, 20, NTILE_MEMORY_BANK);
 
     add_spawn_point(sect_x + 4, paths[0] - 1);
     add_spawn_point(sect_x + 10, paths[1] - 1);
@@ -693,7 +700,7 @@ static void gen_maze(int sect_x, int tier) {
     }
     /* Glitch artifacts in open space */
     if (lrng_range(2) == 0)
-        set_tile(sect_x + 5 + lrng_range(6), 6 + lrng_range(3), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 5 + lrng_range(6), 6 + lrng_range(3), NTILE_GLITCH);
 
     /* Maze hazards */
     if (tier > 2) {
@@ -709,12 +716,12 @@ static void gen_maze(int sect_x, int tier) {
 static void gen_boss(int sect_x, int tier) {
     /* Boss arena — special boss floor */
     for (int x = sect_x; x < sect_x + 16 && x < NET_MAP_W; x++) {
-        set_tile(x, 28, NTILE_BOSS_FLOOR, TILE_SOLID);
+        set_visual_tile(x, 28, NTILE_BOSS_FLOOR);
     }
     /* Ceiling with arena border */
     fill_solid(sect_x, 0, 16, 2);
     for (int x = sect_x; x < sect_x + 16 && x < NET_MAP_W; x++) {
-        set_tile(x, 2, NTILE_ARENA_BORDER, TILE_SOLID);
+        set_visual_tile(x, 2, NTILE_ARENA_BORDER);
     }
     /* Walls with corners */
     fill_solid(sect_x, 3, 1, 25);
@@ -734,56 +741,56 @@ static void gen_boss(int sect_x, int tier) {
 
     /* Rich boss arena decoration */
     /* Wall-mounted screens — surveillance feel */
-    set_tile(sect_x + 1, 8, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 8, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 16, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 16, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 24, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 24, NTILE_SCREEN, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 8, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 8, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 16, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 16, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 24, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 24, NTILE_SCREEN);
 
     /* Central conduit array on ceiling */
     for (int cx = sect_x + 6; cx <= sect_x + 9; cx++)
-        set_tile(cx, 3, NTILE_CONDUIT, TILE_EMPTY);
+        set_visual_tile(cx, 3, NTILE_CONDUIT);
 
     /* Cable network from conduit to walls */
-    set_tile(sect_x + 3, 3, NTILE_CABLE_CORNER, TILE_EMPTY);
-    set_tile(sect_x + 12, 3, NTILE_CABLE_CORNER, TILE_EMPTY);
-    set_tile(sect_x + 4, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 5, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 10, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 11, 3, NTILE_CABLE_H, TILE_EMPTY);
+    set_visual_tile(sect_x + 3, 3, NTILE_CABLE_CORNER);
+    set_visual_tile(sect_x + 12, 3, NTILE_CABLE_CORNER);
+    set_visual_tile(sect_x + 4, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 5, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 10, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 11, 3, NTILE_CABLE_H);
 
     /* Vertical conduits down walls */
     for (int r = 4; r < 10; r++) {
-        set_tile(sect_x + 1, r, NTILE_CONDUIT, TILE_EMPTY);
-        set_tile(sect_x + 14, r, NTILE_CONDUIT, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, r, NTILE_CONDUIT);
+        set_visual_tile(sect_x + 14, r, NTILE_CONDUIT);
     }
 
     /* Data streams on walls mid-section */
-    set_tile(sect_x + 1, 12, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 14, 12, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 1, 20, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 14, 20, NTILE_DATA_STREAM, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 12, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 14, 12, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 1, 20, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 14, 20, NTILE_DATA_STREAM);
 
     /* Junction boxes at wall intersections */
-    set_tile(sect_x + 1, 10, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 10, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 10, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 10, NTILE_JUNCTION_BOX);
 
     /* Console at player entry side */
-    set_tile(sect_x + 4, 27, NTILE_CONSOLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 4, 27, NTILE_CONSOLE);
 
     /* Floor circuit traces in boss arena */
-    set_tile(sect_x + 3, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 7, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 12, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 3, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 7, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 12, 28, NTILE_FLOOR_CIRCUIT);
 
     /* Memory banks near entry */
-    set_tile(sect_x + 2, 26, NTILE_MEMORY_BANK, TILE_EMPTY);
+    set_visual_tile(sect_x + 2, 26, NTILE_MEMORY_BANK);
 
     /* Neon signs marking the arena */
-    set_tile(sect_x + 5, 4, NTILE_NEON_SIGN, TILE_EMPTY);
-    set_tile(sect_x + 10, 4, NTILE_NEON_SIGN, TILE_EMPTY);
+    set_visual_tile(sect_x + 5, 4, NTILE_NEON_SIGN);
+    set_visual_tile(sect_x + 10, 4, NTILE_NEON_SIGN);
 
     /* Entry opening in left wall (3 tiles high, at floor level) */
     for (int oy = 25; oy <= 27; oy++) {
@@ -823,8 +830,8 @@ static void gen_waterfall(int sect_x, int tier) {
     if (variant == 0) {
         /* Twin falls — two data streams with platforms between */
         for (int y = 3; y < 28; y++) {
-            set_tile(sect_x + 5, y, NTILE_DATA_WATERFALL, TILE_EMPTY);
-            set_tile(sect_x + 10, y, NTILE_DATA_WATERFALL, TILE_EMPTY);
+            set_visual_tile(sect_x + 5, y, NTILE_DATA_WATERFALL);
+            set_visual_tile(sect_x + 10, y, NTILE_DATA_WATERFALL);
         }
         /* Platforms between the falls — spawn on every other to avoid overcrowding */
         int y = 8;
@@ -842,15 +849,15 @@ static void gen_waterfall(int sect_x, int tier) {
         add_platform(sect_x + 1, 14, 3);
         add_platform(sect_x + 12, 20, 3);
         /* Mist effect — data stream particles near falls */
-        set_tile(sect_x + 4, 12, NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 11, 16, NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 4, 22, NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 11, 8, NTILE_DATA_STREAM, TILE_EMPTY);
+        set_visual_tile(sect_x + 4, 12, NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 11, 16, NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 4, 22, NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 11, 8, NTILE_DATA_STREAM);
     } else {
         /* Cascade grotto — wide central fall with offset platforms */
         for (int y = 3; y < 28; y++) {
-            set_tile(sect_x + 7, y, NTILE_DATA_WATERFALL, TILE_EMPTY);
-            set_tile(sect_x + 8, y, NTILE_DATA_WATERFALL, TILE_EMPTY);
+            set_visual_tile(sect_x + 7, y, NTILE_DATA_WATERFALL);
+            set_visual_tile(sect_x + 8, y, NTILE_DATA_WATERFALL);
         }
         int y = 8;
         int side = 0;
@@ -872,39 +879,39 @@ static void gen_waterfall(int sect_x, int tier) {
 
     /* Pipe runs on sides with junction boxes */
     for (int r = 4; r < 28; r++) {
-        set_tile(sect_x + 1, r, NTILE_PIPE_V, TILE_EMPTY);
-        set_tile(sect_x + 14, r, NTILE_PIPE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, r, NTILE_PIPE_V);
+        set_visual_tile(sect_x + 14, r, NTILE_PIPE_V);
     }
-    set_tile(sect_x + 1, 10, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 18, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 10, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 18, NTILE_JUNCTION_BOX);
 
     /* Ceiling cables connecting to falls */
-    set_tile(sect_x + 3, 3, NTILE_CABLE_CORNER, TILE_EMPTY);
-    set_tile(sect_x + 12, 3, NTILE_CABLE_CORNER, TILE_EMPTY);
-    set_tile(sect_x + 4, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 5, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 10, 3, NTILE_CABLE_H, TILE_EMPTY);
-    set_tile(sect_x + 11, 3, NTILE_CABLE_H, TILE_EMPTY);
+    set_visual_tile(sect_x + 3, 3, NTILE_CABLE_CORNER);
+    set_visual_tile(sect_x + 12, 3, NTILE_CABLE_CORNER);
+    set_visual_tile(sect_x + 4, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 5, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 10, 3, NTILE_CABLE_H);
+    set_visual_tile(sect_x + 11, 3, NTILE_CABLE_H);
 
     /* Wall decorations */
-    set_tile(sect_x + 1, 6, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 24, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 22, NTILE_CONDUIT, TILE_EMPTY);
-    set_tile(sect_x + 14, 8, NTILE_CONDUIT, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 6, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 24, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 22, NTILE_CONDUIT);
+    set_visual_tile(sect_x + 14, 8, NTILE_CONDUIT);
 
     /* Floor decoration */
-    set_tile(sect_x + 3, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
-    set_tile(sect_x + 12, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
-    set_tile(sect_x + 7, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 8, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 3, 30, NTILE_FLOOR_GRATE);
+    set_visual_tile(sect_x + 12, 30, NTILE_FLOOR_GRATE);
+    set_visual_tile(sect_x + 7, 30, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 8, 30, NTILE_FLOOR_CIRCUIT);
 
     /* Glitch artifacts near data streams */
     if (lrng_range(3) == 0) {
-        set_tile(sect_x + 6, 10 + lrng_range(8), NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 6, 10 + lrng_range(8), NTILE_GLITCH);
     }
     /* Neon sign */
     if (lrng_range(2) == 0) {
-        set_tile(sect_x + 2 + lrng_range(3), 4, NTILE_NEON_SIGN, TILE_EMPTY);
+        set_visual_tile(sect_x + 2 + lrng_range(3), 4, NTILE_NEON_SIGN);
     }
 
     if (tier > 2) {
@@ -944,52 +951,52 @@ static void gen_transit(int sect_x, int tier) {
 
     /* Cables connecting platforms */
     for (int r = high_y + 1; r < low_y; r++)
-        set_tile(sect_x + 7, r, NTILE_CABLE_V, TILE_EMPTY);
+        set_visual_tile(sect_x + 7, r, NTILE_CABLE_V);
 
     if (variant == 0) {
         /* Platform relay — junction nodes at platforms, server bank below */
-        set_tile(sect_x + 2, high_y - 1, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-        set_tile(sect_x + 10, high_y - 1, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, high_y - 1, NTILE_CIRCUIT_NODE);
+        set_visual_tile(sect_x + 10, high_y - 1, NTILE_CIRCUIT_NODE);
         /* Server bank under low platforms */
-        set_tile(sect_x + 2, 26, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 2, 27, NTILE_SERVER_BOT, TILE_EMPTY);
-        set_tile(sect_x + 13, 26, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 13, 27, NTILE_SERVER_BOT, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, 26, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 2, 27, NTILE_SERVER_BOT);
+        set_visual_tile(sect_x + 13, 26, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 13, 27, NTILE_SERVER_BOT);
         /* Pipe network along ceiling */
         for (int px = sect_x + 2; px < sect_x + 14; px += 3)
-            set_tile(px, 3, NTILE_PIPE_H, TILE_EMPTY);
+            set_visual_tile(px, 3, NTILE_PIPE_H);
         /* Console at ground level */
-        set_tile(sect_x + 7, 29, NTILE_CONSOLE, TILE_EMPTY);
+        set_visual_tile(sect_x + 7, 29, NTILE_CONSOLE);
     } else {
         /* Data highway — horizontal data streams that push player */
         for (int x = sect_x + 3; x < sect_x + 13; x++) {
             set_tile(x, high_y + 2, NTILE_DATA_STREAM, TILE_STREAM);
         }
         /* Memory banks on walls */
-        set_tile(sect_x + 1, 10, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 14, 14, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 1, 20, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 14, 24, NTILE_MEMORY_BANK, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, 10, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 14, 14, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 1, 20, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 14, 24, NTILE_MEMORY_BANK);
         /* Conduit run on floor */
-        set_tile(sect_x + 4, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-        set_tile(sect_x + 11, 30, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+        set_visual_tile(sect_x + 4, 30, NTILE_FLOOR_CIRCUIT);
+        set_visual_tile(sect_x + 11, 30, NTILE_FLOOR_CIRCUIT);
     }
 
     /* Common decoration: neon signs, screens, wall detail */
-    set_tile(sect_x + 3, 3, NTILE_NEON_SIGN, TILE_EMPTY);
-    set_tile(sect_x + 12, 3, NTILE_NEON_SIGN, TILE_EMPTY);
-    set_tile(sect_x + 1, 16, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 10, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 27, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 27, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 3, 3, NTILE_NEON_SIGN);
+    set_visual_tile(sect_x + 12, 3, NTILE_NEON_SIGN);
+    set_visual_tile(sect_x + 1, 16, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 10, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 27, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 27, NTILE_JUNCTION_BOX);
 
     /* Floor grates */
-    set_tile(sect_x + 6, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
-    set_tile(sect_x + 9, 30, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 6, 30, NTILE_FLOOR_GRATE);
+    set_visual_tile(sect_x + 9, 30, NTILE_FLOOR_GRATE);
 
     /* Glitch near cables */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 8, high_y + 3, NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 8, high_y + 3, NTILE_GLITCH);
 
     if (tier > 3) {
         add_hazard(sect_x + 5, 29);
@@ -1053,29 +1060,29 @@ static void gen_security(int sect_x, int tier) {
     add_spawn_point(sect_x + 12, 27);
 
     /* Security screens monitoring the grid */
-    set_tile(sect_x + 7, 3, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 8, 3, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 1, 6, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 20, NTILE_SCREEN, TILE_EMPTY);
+    set_visual_tile(sect_x + 7, 3, NTILE_SCREEN);
+    set_visual_tile(sect_x + 8, 3, NTILE_SCREEN);
+    set_visual_tile(sect_x + 1, 6, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 20, NTILE_SCREEN);
 
     /* Side wall conduit runs */
     for (int r = 5; r < 26; r += 4) {
-        set_tile(sect_x + 1, r, NTILE_CONDUIT, TILE_EMPTY);
-        set_tile(sect_x + 14, r + 2, NTILE_CONDUIT, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, r, NTILE_CONDUIT);
+        set_visual_tile(sect_x + 14, r + 2, NTILE_CONDUIT);
     }
 
     /* Floor circuit traces */
-    set_tile(sect_x + 3, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 7, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 11, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 3, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 7, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 11, 28, NTILE_FLOOR_CIRCUIT);
 
     /* Pipe network above */
-    set_tile(sect_x + 4, 3, NTILE_PIPE_H, TILE_EMPTY);
-    set_tile(sect_x + 11, 3, NTILE_PIPE_H, TILE_EMPTY);
+    set_visual_tile(sect_x + 4, 3, NTILE_PIPE_H);
+    set_visual_tile(sect_x + 11, 3, NTILE_PIPE_H);
 
     /* Junction boxes */
-    set_tile(sect_x + 1, 26, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 26, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 26, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 26, NTILE_JUNCTION_BOX);
 }
 
 static void gen_cache(int sect_x, int tier) {
@@ -1109,53 +1116,53 @@ static void gen_cache(int sect_x, int tier) {
     }
     /* Circuit floor inside room */
     for (int bx = room_x + 1; bx < room_x + 5 && bx < NET_MAP_W; bx++)
-        set_tile(bx, room_y + 4, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+        set_visual_tile(bx, room_y + 4, NTILE_FLOOR_CIRCUIT);
 
     /* Item spawn OUTSIDE room entrance (not inside sealed breakable walls) */
     add_spawn_point(room_x - 2, room_y + 3);
 
     if (variant == 0) {
         /* Hidden vault — server banks, conduits, sealed feel */
-        set_tile(sect_x + 2, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 2, 5, NTILE_SERVER_BOT, TILE_EMPTY);
-        set_tile(sect_x + 4, 4, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 4, 5, NTILE_SERVER_BOT, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, 4, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 2, 5, NTILE_SERVER_BOT);
+        set_visual_tile(sect_x + 4, 4, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 4, 5, NTILE_SERVER_BOT);
         /* Conduit run connecting servers to vault */
         for (int cx = sect_x + 5; cx < room_x; cx++)
-            set_tile(cx, 5, NTILE_CABLE_H, TILE_EMPTY);
-        set_tile(room_x, 5, NTILE_CABLE_CORNER, TILE_EMPTY);
+            set_visual_tile(cx, 5, NTILE_CABLE_H);
+        set_visual_tile(room_x, 5, NTILE_CABLE_CORNER);
         for (int cy = 6; cy < room_y; cy++)
-            set_tile(room_x, cy, NTILE_CABLE_V, TILE_EMPTY);
+            set_visual_tile(room_x, cy, NTILE_CABLE_V);
         /* Screens showing vault status */
-        set_tile(sect_x + 1, 12, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 1, 16, NTILE_SCREEN, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, 12, NTILE_SCREEN);
+        set_visual_tile(sect_x + 1, 16, NTILE_SCREEN);
     } else {
         /* Data archive — memory banks, data streams, scholarly */
-        set_tile(sect_x + 1, 6, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 1, 10, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 1, 14, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 1, 18, NTILE_MEMORY_BANK, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, 6, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 1, 10, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 1, 14, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 1, 18, NTILE_MEMORY_BANK);
         /* Data streams flowing down from ceiling */
-        set_tile(sect_x + 3, 4, NTILE_DATA_WATERFALL, TILE_EMPTY);
-        set_tile(sect_x + 3, 8, NTILE_DATA_WATERFALL, TILE_EMPTY);
-        set_tile(sect_x + 3, 12, NTILE_DATA_WATERFALL, TILE_EMPTY);
+        set_visual_tile(sect_x + 3, 4, NTILE_DATA_WATERFALL);
+        set_visual_tile(sect_x + 3, 8, NTILE_DATA_WATERFALL);
+        set_visual_tile(sect_x + 3, 12, NTILE_DATA_WATERFALL);
         /* Circuit nodes connecting archive to vault */
-        set_tile(sect_x + 6, 16, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-        set_tile(sect_x + 6, 10, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+        set_visual_tile(sect_x + 6, 16, NTILE_CIRCUIT_NODE);
+        set_visual_tile(sect_x + 6, 10, NTILE_CIRCUIT_NODE);
     }
 
     /* Console near vault entrance */
-    set_tile(sect_x + 7, 27, NTILE_CONSOLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 7, 27, NTILE_CONSOLE);
     /* Broken panels hint something was forced open */
-    set_tile(sect_x + 14, 10, NTILE_BROKEN_PANEL, TILE_EMPTY);
-    set_tile(sect_x + 14, 16, NTILE_BROKEN_PANEL, TILE_EMPTY);
+    set_visual_tile(sect_x + 14, 10, NTILE_BROKEN_PANEL);
+    set_visual_tile(sect_x + 14, 16, NTILE_BROKEN_PANEL);
     /* Neon sign above vault */
-    set_tile(sect_x + 10, room_y - 2, NTILE_NEON_SIGN, TILE_EMPTY);
+    set_visual_tile(sect_x + 10, room_y - 2, NTILE_NEON_SIGN);
     /* Pipe along ceiling */
     for (int px = sect_x + 6; px < sect_x + 14; px += 3)
-        set_tile(px, 3, NTILE_PIPE_H, TILE_EMPTY);
+        set_visual_tile(px, 3, NTILE_PIPE_H);
     /* Floor grate near entrance */
-    set_tile(sect_x + 5, 28, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 5, 28, NTILE_FLOOR_GRATE);
 
     /* Additional breakable at higher tiers */
     if (tier > 2) {
@@ -1196,61 +1203,61 @@ static void gen_network(int sect_x, int tier) {
         for (int l = 0; l < 3; l++) {
             int cable_x = sect_x + 7 + l * 2;
             for (int cy = layers[l] + 1; cy < layers[l + 1]; cy++)
-                set_tile(cable_x, cy, NTILE_CABLE_V, TILE_EMPTY);
+                set_visual_tile(cable_x, cy, NTILE_CABLE_V);
         }
         /* Server racks on alternate layers */
-        set_tile(sect_x + 2, layers[0] - 2, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 2, layers[0] - 1, NTILE_SERVER_BOT, TILE_EMPTY);
-        set_tile(sect_x + 13, layers[1] - 2, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 13, layers[1] - 1, NTILE_SERVER_BOT, TILE_EMPTY);
-        set_tile(sect_x + 2, layers[2] - 2, NTILE_SERVER_TOP, TILE_EMPTY);
-        set_tile(sect_x + 2, layers[2] - 1, NTILE_SERVER_BOT, TILE_EMPTY);
+        set_visual_tile(sect_x + 2, layers[0] - 2, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 2, layers[0] - 1, NTILE_SERVER_BOT);
+        set_visual_tile(sect_x + 13, layers[1] - 2, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 13, layers[1] - 1, NTILE_SERVER_BOT);
+        set_visual_tile(sect_x + 2, layers[2] - 2, NTILE_SERVER_TOP);
+        set_visual_tile(sect_x + 2, layers[2] - 1, NTILE_SERVER_BOT);
         /* Data streams on bottom layer */
-        set_tile(sect_x + 5, layers[3] - 1, NTILE_DATA_STREAM, TILE_EMPTY);
-        set_tile(sect_x + 10, layers[3] - 1, NTILE_DATA_STREAM, TILE_EMPTY);
+        set_visual_tile(sect_x + 5, layers[3] - 1, NTILE_DATA_STREAM);
+        set_visual_tile(sect_x + 10, layers[3] - 1, NTILE_DATA_STREAM);
     } else {
         /* Hub-spoke — central conduit column with radial connections */
         for (int cy = 3; cy < 28; cy++)
-            set_tile(sect_x + 8, cy, NTILE_CONDUIT, TILE_EMPTY);
+            set_visual_tile(sect_x + 8, cy, NTILE_CONDUIT);
         /* Horizontal cables from conduit to walls */
         for (int l = 0; l < 4; l++) {
             int hy = layers[l] - 2;
             for (int hx = sect_x + 2; hx < sect_x + 8; hx++)
-                set_tile(hx, hy, NTILE_CABLE_H, TILE_EMPTY);
+                set_visual_tile(hx, hy, NTILE_CABLE_H);
             for (int hx = sect_x + 9; hx < sect_x + 14; hx++)
-                set_tile(hx, hy, NTILE_CABLE_H, TILE_EMPTY);
+                set_visual_tile(hx, hy, NTILE_CABLE_H);
         }
         /* Memory banks at cable endpoints */
-        set_tile(sect_x + 1, layers[0] - 2, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 14, layers[1] - 2, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 1, layers[2] - 2, NTILE_MEMORY_BANK, TILE_EMPTY);
-        set_tile(sect_x + 14, layers[3] - 2, NTILE_MEMORY_BANK, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, layers[0] - 2, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 14, layers[1] - 2, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 1, layers[2] - 2, NTILE_MEMORY_BANK);
+        set_visual_tile(sect_x + 14, layers[3] - 2, NTILE_MEMORY_BANK);
     }
 
     /* Common decoration */
     /* Circuit nodes at layer intersections */
-    set_tile(sect_x + 4, 7, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 11, 13, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 4, 19, NTILE_CIRCUIT_NODE, TILE_EMPTY);
-    set_tile(sect_x + 11, 25, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+    set_visual_tile(sect_x + 4, 7, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 11, 13, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 4, 19, NTILE_CIRCUIT_NODE);
+    set_visual_tile(sect_x + 11, 25, NTILE_CIRCUIT_NODE);
 
     /* Screens and consoles */
-    set_tile(sect_x + 1, 5, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 5, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 6, layers[3] - 1, NTILE_CONSOLE, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 5, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 5, NTILE_SCREEN);
+    set_visual_tile(sect_x + 6, layers[3] - 1, NTILE_CONSOLE);
 
     /* Floor circuit traces on bottom */
-    set_tile(sect_x + 4, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 12, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+    set_visual_tile(sect_x + 4, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 12, 28, NTILE_FLOOR_CIRCUIT);
 
     /* Pipe on ceiling */
     for (int px = sect_x + 3; px < sect_x + 13; px += 4)
-        set_tile(px, 3, NTILE_PIPE_H, TILE_EMPTY);
+        set_visual_tile(px, 3, NTILE_PIPE_H);
 
     /* Glitch artifacts */
     if (lrng_range(3) == 0)
-        set_tile(sect_x + 5 + lrng_range(6), 14, NTILE_GLITCH, TILE_EMPTY);
+        set_visual_tile(sect_x + 5 + lrng_range(6), 14, NTILE_GLITCH);
 
     if (tier > 2)
         add_hazard(sect_x + 7, layers[1] - 1);
@@ -1272,7 +1279,7 @@ static void gen_gauntlet(int sect_x, int tier) {
     set_tile(sect_x + 15, 28, NTILE_CORNER_BR, TILE_SOLID);
     fill_solid(sect_x, 0, 16, 2);
     for (int x = sect_x; x < sect_x + 16 && x < NET_MAP_W; x++)
-        set_tile(x, 2, NTILE_ARENA_BORDER, TILE_SOLID);
+        set_visual_tile(x, 2, NTILE_ARENA_BORDER);
 
     /* Side walls */
     fill_solid(sect_x, 3, 1, 25);
@@ -1295,10 +1302,10 @@ static void gen_gauntlet(int sect_x, int tier) {
         set_tile(sect_x + 5, 12, NTILE_PLAT_EDGE_L, TILE_PLATFORM);
         set_tile(sect_x + 10, 12, NTILE_PLAT_EDGE_R, TILE_PLATFORM);
         /* Wall-mounted screens tracking combat */
-        set_tile(sect_x + 1, 8, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 14, 8, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 1, 16, NTILE_SCREEN, TILE_EMPTY);
-        set_tile(sect_x + 14, 16, NTILE_SCREEN, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, 8, NTILE_SCREEN);
+        set_visual_tile(sect_x + 14, 8, NTILE_SCREEN);
+        set_visual_tile(sect_x + 1, 16, NTILE_SCREEN);
+        set_visual_tile(sect_x + 14, 16, NTILE_SCREEN);
     } else {
         /* Killbox corridor — narrow with obstacles */
         /* Low ceiling in center */
@@ -1313,8 +1320,8 @@ static void gen_gauntlet(int sect_x, int tier) {
         set_tile(sect_x + 5, 27, NTILE_BREAKABLE, TILE_SOLID);
         set_tile(sect_x + 10, 27, NTILE_BREAKABLE, TILE_SOLID);
         /* Wall greeble */
-        set_tile(sect_x + 1, 10, NTILE_CORRIDOR_GREEBLE, TILE_EMPTY);
-        set_tile(sect_x + 14, 14, NTILE_CORRIDOR_GREEBLE, TILE_EMPTY);
+        set_visual_tile(sect_x + 1, 10, NTILE_CORRIDOR_GREEBLE);
+        set_visual_tile(sect_x + 14, 14, NTILE_CORRIDOR_GREEBLE);
     }
 
     /* Dense enemy spawns — up to 5 */
@@ -1336,25 +1343,25 @@ static void gen_gauntlet(int sect_x, int tier) {
     }
 
     /* Common decoration */
-    set_tile(sect_x + 1, 12, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 14, 12, NTILE_SCREEN, TILE_EMPTY);
-    set_tile(sect_x + 7, 3, NTILE_NEON_SIGN, TILE_EMPTY);
-    set_tile(sect_x + 8, 3, NTILE_NEON_SIGN, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 12, NTILE_SCREEN);
+    set_visual_tile(sect_x + 14, 12, NTILE_SCREEN);
+    set_visual_tile(sect_x + 7, 3, NTILE_NEON_SIGN);
+    set_visual_tile(sect_x + 8, 3, NTILE_NEON_SIGN);
 
     /* Wall conduits */
-    set_tile(sect_x + 1, 20, NTILE_CONDUIT, TILE_EMPTY);
-    set_tile(sect_x + 14, 20, NTILE_CONDUIT, TILE_EMPTY);
-    set_tile(sect_x + 1, 24, NTILE_JUNCTION_BOX, TILE_EMPTY);
-    set_tile(sect_x + 14, 24, NTILE_JUNCTION_BOX, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 20, NTILE_CONDUIT);
+    set_visual_tile(sect_x + 14, 20, NTILE_CONDUIT);
+    set_visual_tile(sect_x + 1, 24, NTILE_JUNCTION_BOX);
+    set_visual_tile(sect_x + 14, 24, NTILE_JUNCTION_BOX);
 
     /* Floor details */
-    set_tile(sect_x + 4, 28, NTILE_FLOOR_GRATE, TILE_SOLID);
-    set_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
-    set_tile(sect_x + 12, 28, NTILE_FLOOR_GRATE, TILE_SOLID);
+    set_visual_tile(sect_x + 4, 28, NTILE_FLOOR_GRATE);
+    set_visual_tile(sect_x + 8, 28, NTILE_FLOOR_CIRCUIT);
+    set_visual_tile(sect_x + 12, 28, NTILE_FLOOR_GRATE);
 
     /* Data streams on walls */
-    set_tile(sect_x + 1, 6, NTILE_DATA_STREAM, TILE_EMPTY);
-    set_tile(sect_x + 14, 6, NTILE_DATA_STREAM, TILE_EMPTY);
+    set_visual_tile(sect_x + 1, 6, NTILE_DATA_STREAM);
+    set_visual_tile(sect_x + 14, 6, NTILE_DATA_STREAM);
 }
 
 /* ---- Main generator ---- */
@@ -1649,7 +1656,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int gx = sx + 3 + lrng_range(10);
                     for (int gy = 4; gy < 20; gy += 2 + lrng_range(3)) {
                         if (level_data.collision[gy * NET_MAP_W + gx] == TILE_EMPTY)
-                            set_tile(gx, gy, NTILE_GLITCH, TILE_EMPTY);
+                            set_visual_tile(gx, gy, NTILE_GLITCH);
                     }
                 }
                 /* Error screens — flickering wall monitors */
@@ -1657,17 +1664,17 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int vx = sx + 1 + lrng_range(14);
                     int vy = 3 + lrng_range(6);
                     if (level_data.collision[vy * NET_MAP_W + vx] == TILE_EMPTY) {
-                        set_tile(vx, vy, NTILE_SCREEN, TILE_EMPTY);
+                        set_visual_tile(vx, vy, NTILE_SCREEN);
                         /* Broken panel below screen = corrupted terminal */
                         if (vy + 1 < NET_MAP_H && level_data.collision[(vy+1) * NET_MAP_W + vx] == TILE_EMPTY)
-                            set_tile(vx, vy + 1, NTILE_BROKEN_PANEL, TILE_EMPTY);
+                            set_visual_tile(vx, vy + 1, NTILE_BROKEN_PANEL);
                     }
                 }
                 /* Scattered circuit debris on floors */
                 for (int fx = sx; fx < sx + 16; fx++) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR && lrng_range(6) == 0)
-                            set_tile(fx, fy, NTILE_FLOOR_CRACKED, TILE_SOLID);
+                            set_visual_tile(fx, fy, NTILE_FLOOR_CRACKED);
                     }
                 }
                 break;
@@ -1678,14 +1685,14 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int cx = sx + 2 + lrng_range(12);
                     int cy = 3;
                     if (level_data.collision[cy * NET_MAP_W + cx] == TILE_EMPTY) {
-                        set_tile(cx, cy, NTILE_JUNCTION_BOX, TILE_EMPTY);
+                        set_visual_tile(cx, cy, NTILE_JUNCTION_BOX);
                         /* Cables radiating from junction box */
                         if (cx > 0 && level_data.collision[cy * NET_MAP_W + cx - 1] == TILE_EMPTY)
-                            set_tile(cx - 1, cy, NTILE_CABLE_H, TILE_EMPTY);
+                            set_visual_tile(cx - 1, cy, NTILE_CABLE_H);
                         if (cx + 1 < NET_MAP_W && level_data.collision[cy * NET_MAP_W + cx + 1] == TILE_EMPTY)
-                            set_tile(cx + 1, cy, NTILE_CABLE_H, TILE_EMPTY);
+                            set_visual_tile(cx + 1, cy, NTILE_CABLE_H);
                         if (cy + 1 < NET_MAP_H && level_data.collision[(cy+1) * NET_MAP_W + cx] == TILE_EMPTY)
-                            set_tile(cx, cy + 1, NTILE_CABLE_V, TILE_EMPTY);
+                            set_visual_tile(cx, cy + 1, NTILE_CABLE_V);
                     }
                 }
                 /* Server rack workstations — paired server + console */
@@ -1694,23 +1701,23 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int wy = 4 + lrng_range(4);
                     if (level_data.collision[wy * NET_MAP_W + wx] == TILE_EMPTY &&
                         level_data.collision[(wy+1) * NET_MAP_W + wx] == TILE_EMPTY) {
-                        set_tile(wx, wy, NTILE_SERVER_TOP, TILE_EMPTY);
-                        set_tile(wx, wy + 1, NTILE_SERVER_BOT, TILE_EMPTY);
+                        set_visual_tile(wx, wy, NTILE_SERVER_TOP);
+                        set_visual_tile(wx, wy + 1, NTILE_SERVER_BOT);
                         /* Console next to rack = analyst station */
                         if (wx + 1 < NET_MAP_W && level_data.collision[(wy+1) * NET_MAP_W + wx + 1] == TILE_EMPTY)
-                            set_tile(wx + 1, wy + 1, NTILE_CONSOLE, TILE_EMPTY);
+                            set_visual_tile(wx + 1, wy + 1, NTILE_CONSOLE);
                     }
                 }
                 /* Data highway: horizontal cable runs across ceiling */
                 for (int hx = sx; hx < sx + 16; hx++) {
                     if (level_data.collision[3 * NET_MAP_W + hx] == TILE_EMPTY && lrng_range(3) == 0)
-                        set_tile(hx, 3, NTILE_CABLE_H, TILE_EMPTY);
+                        set_visual_tile(hx, 3, NTILE_CABLE_H);
                 }
                 /* Clean circuit floors — organized infrastructure */
                 for (int fx = sx; fx < sx + 16; fx++) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR && lrng_range(5) == 0)
-                            set_tile(fx, fy, NTILE_FLOOR_CIRCUIT, TILE_SOLID);
+                            set_visual_tile(fx, fy, NTILE_FLOOR_CIRCUIT);
                     }
                 }
                 break;
@@ -1723,7 +1730,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     for (int ty = start_y; ty < start_y + 4 + lrng_range(6); ty++) {
                         if (ty >= NET_MAP_H) break;
                         if (level_data.collision[ty * NET_MAP_W + tx] == TILE_EMPTY) {
-                            set_tile(tx, ty, (lrng_range(3) == 0) ? NTILE_DATA_STREAM : NTILE_DATA_WATERFALL, TILE_EMPTY);
+                            set_visual_tile(tx, ty, (lrng_range(3) == 0) ? NTILE_DATA_STREAM : NTILE_DATA_WATERFALL);
                         }
                         /* Organic branching: sometimes shift sideways */
                         if (lrng_range(3) == 0) tx += (lrng_range(2) == 0) ? 1 : -1;
@@ -1735,7 +1742,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int nx = sx + 3 + lrng_range(10);
                     int ny = 6 + lrng_range(10);
                     if (level_data.collision[ny * NET_MAP_W + nx] == TILE_EMPTY) {
-                        set_tile(nx, ny, NTILE_CIRCUIT_NODE, TILE_EMPTY);
+                        set_visual_tile(nx, ny, NTILE_CIRCUIT_NODE);
                         /* Glitch artifacts radiating from node */
                         for (int d = 0; d < 4; d++) {
                             int dx2 = (d == 0) ? -1 : (d == 1) ? 1 : 0;
@@ -1744,7 +1751,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                             int gy = ny + dy2;
                             if (gx >= 0 && gx < NET_MAP_W && gy >= 0 && gy < NET_MAP_H &&
                                 level_data.collision[gy * NET_MAP_W + gx] == TILE_EMPTY)
-                                set_tile(gx, gy, NTILE_GLITCH, TILE_EMPTY);
+                                set_visual_tile(gx, gy, NTILE_GLITCH);
                         }
                     }
                 }
@@ -1752,7 +1759,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                 for (int fx = sx; fx < sx + 16; fx++) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR && lrng_range(4) == 0)
-                            set_tile(fx, fy, NTILE_FLOOR_CRACKED, TILE_SOLID);
+                            set_visual_tile(fx, fy, NTILE_FLOOR_CRACKED);
                     }
                 }
                 break;
@@ -1763,18 +1770,18 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int bx2 = sx + 1 + lrng_range(14);
                     int by2 = 4 + lrng_range(16);
                     if (level_data.collision[by2 * NET_MAP_W + bx2] == TILE_EMPTY)
-                        set_tile(bx2, by2, NTILE_BROKEN_PANEL, TILE_EMPTY);
+                        set_visual_tile(bx2, by2, NTILE_BROKEN_PANEL);
                 }
                 /* Severed conduit: conduit with sparking cables */
                 {
                     int cx = sx + 3 + lrng_range(10);
                     int cy = 5 + lrng_range(8);
                     if (level_data.collision[cy * NET_MAP_W + cx] == TILE_EMPTY) {
-                        set_tile(cx, cy, NTILE_CONDUIT, TILE_EMPTY);
+                        set_visual_tile(cx, cy, NTILE_CONDUIT);
                         /* Severed cable dangling below */
                         for (int d = 1; d <= 2 + lrng_range(3); d++) {
                             if (cy + d < NET_MAP_H && level_data.collision[(cy+d) * NET_MAP_W + cx] == TILE_EMPTY)
-                                set_tile(cx, cy + d, NTILE_CABLE_V, TILE_EMPTY);
+                                set_visual_tile(cx, cy + d, NTILE_CABLE_V);
                         }
                     }
                 }
@@ -1783,23 +1790,23 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int rx = sx + 2 + lrng_range(12);
                     int ry = 4 + lrng_range(6);
                     if (level_data.collision[ry * NET_MAP_W + rx] == TILE_EMPTY) {
-                        set_tile(rx, ry, NTILE_SERVER_TOP, TILE_EMPTY);
+                        set_visual_tile(rx, ry, NTILE_SERVER_TOP);
                         if (ry + 1 < NET_MAP_H && level_data.collision[(ry+1) * NET_MAP_W + rx] == TILE_EMPTY)
-                            set_tile(rx, ry + 1, NTILE_BROKEN_PANEL, TILE_EMPTY);
+                            set_visual_tile(rx, ry + 1, NTILE_BROKEN_PANEL);
                     }
                 }
                 /* Heavy damage to floors */
                 for (int fx = sx; fx < sx + 16; fx++) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR && lrng_range(3) == 0)
-                            set_tile(fx, fy, NTILE_FLOOR_CRACKED, TILE_SOLID);
+                            set_visual_tile(fx, fy, NTILE_FLOOR_CRACKED);
                     }
                 }
                 /* Exposed grates where panels were */
                 for (int fx = sx; fx < sx + 16; fx++) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR && lrng_range(8) == 0)
-                            set_tile(fx, fy, NTILE_FLOOR_GRATE, TILE_SOLID);
+                            set_visual_tile(fx, fy, NTILE_FLOOR_GRATE);
                     }
                 }
                 break;
@@ -1810,14 +1817,14 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     int mx = sx + 3 + lrng_range(10);
                     int my = 4 + lrng_range(8);
                     if (level_data.collision[my * NET_MAP_W + mx] == TILE_EMPTY)
-                        set_tile(mx, my, NTILE_SCREEN, TILE_EMPTY);
+                        set_visual_tile(mx, my, NTILE_SCREEN);
                 }
                 /* Fading data streams — single isolated wisps */
                 if (lrng_range(2) == 0) {
                     int dx2 = sx + 2 + lrng_range(12);
                     int dy2 = 6 + lrng_range(10);
                     if (level_data.collision[dy2 * NET_MAP_W + dx2] == TILE_EMPTY)
-                        set_tile(dx2, dy2, NTILE_DATA_STREAM, TILE_EMPTY);
+                        set_visual_tile(dx2, dy2, NTILE_DATA_STREAM);
                 }
                 /* Clean, empty corridors — remove some existing decoration for sparse feel */
                 for (int fx = sx; fx < sx + 16; fx++) {
@@ -1843,7 +1850,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                         int tile = (r == 0) ? NTILE_GLITCH : (r == 1) ? NTILE_BROKEN_PANEL :
                                    (r == 2) ? NTILE_DATA_STREAM : (r == 3) ? NTILE_DATA_WATERFALL :
                                    (r == 4) ? NTILE_CIRCUIT_NODE : NTILE_CONDUIT;
-                        set_tile(cx, cy, tile, TILE_EMPTY);
+                        set_visual_tile(cx, cy, tile);
                     }
                 }
                 /* Fragmented cables: short random runs */
@@ -1857,7 +1864,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                         int ky = horiz ? cy : cy + k;
                         if (kx >= NET_MAP_W || ky >= NET_MAP_H) break;
                         if (level_data.collision[ky * NET_MAP_W + kx] == TILE_EMPTY)
-                            set_tile(kx, ky, horiz ? NTILE_CABLE_H : NTILE_CABLE_V, TILE_EMPTY);
+                            set_visual_tile(kx, ky, horiz ? NTILE_CABLE_H : NTILE_CABLE_V);
                     }
                 }
                 /* Heavy floor damage: cracked + grate mix */
@@ -1865,8 +1872,8 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
                     for (int fy = 10; fy < NET_MAP_H; fy++) {
                         if (level_data.tiles[fy * NET_MAP_W + fx] == NTILE_FLOOR) {
                             int r = lrng_range(6);
-                            if (r == 0) set_tile(fx, fy, NTILE_FLOOR_CRACKED, TILE_SOLID);
-                            else if (r == 1) set_tile(fx, fy, NTILE_FLOOR_GRATE, TILE_SOLID);
+                            if (r == 0) set_visual_tile(fx, fy, NTILE_FLOOR_CRACKED);
+                            else if (r == 1) set_visual_tile(fx, fy, NTILE_FLOOR_GRATE);
                         }
                     }
                 }
@@ -1877,7 +1884,7 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
             if (lrng_range(4) == 0) {
                 int ny = 4 + lrng_range(6);
                 if (level_data.collision[ny * NET_MAP_W + sx] == TILE_EMPTY)
-                    set_tile(sx, ny, NTILE_NEON_SIGN, TILE_EMPTY);
+                    set_visual_tile(sx, ny, NTILE_NEON_SIGN);
             }
         }
     }

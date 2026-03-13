@@ -53,8 +53,9 @@ static int roll_rarity(int player_lck) {
     int shift = player_lck / 2;
     if (shift > 10) shift = 10;
     roll -= shift;
-    if (roll < 0) roll = 0;
+    /* Allow negative rolls to reach Mythic tier */
 
+    if (roll < -4) return RARITY_MYTHIC;
     if (roll < 1) return RARITY_LEGENDARY;
     if (roll < 6) return RARITY_EPIC;
     if (roll < 20) return RARITY_RARE;
@@ -313,11 +314,11 @@ LootItem* inventory_get_equipped_accessory(void) {
 void inventory_equip(int idx) {
     if (idx < 0 || idx >= INVENTORY_SIZE || !inv_used[idx]) return;
 
+    /* Unequip previously equipped item in same category (weapon/armor/accessory) */
     int cat = LOOT_CATEGORY(inv_items[idx].type);
-
-    /* Unequip previous item of same category */
     for (int i = 0; i < INVENTORY_SIZE; i++) {
-        if (inv_used[i] && LOOT_CATEGORY(inv_items[i].type) == cat) {
+        if (inv_used[i] && (inv_items[i].flags & LOOT_FLAG_EQUIPPED) &&
+            LOOT_CATEGORY(inv_items[i].type) == cat) {
             inv_items[i].flags &= (u8)~LOOT_FLAG_EQUIPPED;
         }
     }
@@ -364,6 +365,10 @@ int craft_fuse(int idx1, int idx2, int idx3) {
     LootItem result;
     loot_generate_any(&result, tier, new_rarity, 0);
     result.rarity = (u8)new_rarity;
+
+    /* Unequip consumed items before removal */
+    b->flags &= (u8)~LOOT_FLAG_EQUIPPED;
+    c->flags &= (u8)~LOOT_FLAG_EQUIPPED;
 
     /* Remove consumed items, place result */
     u8 was_equipped = a->flags & LOOT_FLAG_EQUIPPED;
@@ -427,6 +432,25 @@ int craft_forge(int idx, u16* shards) {
     item->rarity = old_rarity;
     item->level = old_level;
     item->flags = old_flags;
+
+    /* Recalculate stat2 for weapons — loot_generate used a random subtype */
+    if (cat == LOOT_CAT_WEAPON) {
+        int sub = LOOT_SUBTYPE(old_type);
+        int base_rate;
+        switch (sub) {
+        case WEAPON_RAPID:   base_rate = 4; break;
+        case WEAPON_SPREAD:  base_rate = 12; break;
+        case WEAPON_CHARGER: base_rate = 20; break;
+        case WEAPON_BEAM:    base_rate = 2; break;
+        case WEAPON_LASER:   base_rate = 3; break;
+        case WEAPON_HOMING:  base_rate = 15; break;
+        case WEAPON_NOVA:    base_rate = 18; break;
+        default:             base_rate = 8; break;
+        }
+        int rate = base_rate + (int)rand_range(4) - old_rarity;
+        if (rate < 1) rate = 1;
+        item->stat2 = (u8)rate;
+    }
 
     audio_play_sfx(SFX_CRAFT_SUCCESS);
     hud_notify("FORGED!", 60);

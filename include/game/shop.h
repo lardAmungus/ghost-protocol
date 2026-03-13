@@ -17,6 +17,9 @@ enum {
     SHOP_LCK_UP,
     SHOP_SHIELD_PROG,   /* Temporary damage reduction */
     SHOP_SPEED_PROG,    /* Temporary speed boost */
+    SHOP_HEALTH_PACK,   /* Restore 20 HP instantly */
+    SHOP_SHIELD_CHARGE, /* Temp +5 DEF for 120 frames */
+    SHOP_CD_RESET,      /* Reset all ability cooldowns */
     SHOP_ITEM_COUNT
 };
 

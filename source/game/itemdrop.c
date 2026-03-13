@@ -82,6 +82,7 @@ static void load_drop_gfx(void) {
 void itemdrop_init(void) {
     for (int i = 0; i < MAX_DROPS; i++) {
         drops[i].active = 0;
+        drops[i].oam_index = OAM_NONE;
     }
     gfx_loaded = 0;
 }
@@ -171,7 +172,7 @@ void itemdrop_draw_all(s32 cam_x, s32 cam_y) {
         }
 
         /* Off-screen culling */
-        if (sx < -8 || sx > SCREEN_WIDTH + 8 || sy < -8 || sy > SCREEN_HEIGHT + 8) {
+        if (sx < -8 || sx > SCREEN_W + 8 || sy < -8 || sy > SCREEN_H + 8) {
             OBJ_ATTR* oam = sprite_get(drops[i].oam_index);
             if (oam) oam->attr0 = ATTR0_HIDE;
             continue;

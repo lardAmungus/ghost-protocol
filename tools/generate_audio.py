@@ -227,6 +227,54 @@ def make_sfx():
         'echo','0.4','0.3','75','0.5',
         'fade','h','0.01','0.50','0.12', 'gain','-3')
 
+    # 31 — beam fire: sustained low hum with overtones
+    sox_wav(f'{d}/31_beam_fire.wav',
+        'synth','0.30','sine','180:200',
+        'echo','0.6','0.5','40','0.5',
+        'fade','h','0.02','0.35','0.05', 'gain','-4')
+
+    # 32 — laser crack: sharp high-freq snap
+    sox_wav(f'{d}/32_laser_crack.wav',
+        'synth','0.06','sine','2000:800',
+        'overdrive','10','12',
+        'fade','h','0','0.06','0.01', 'gain','-3')
+
+    # 33 — nova whoosh: expanding low sweep outward
+    sox_wav(f'{d}/33_nova_whoosh.wav',
+        'synth','0.25','sine','120:450',
+        'echo','0.5','0.4','60','0.4',
+        'fade','h','0.01','0.30','0.06', 'gain','-3')
+
+    # 34 — homing whine: rising engine whistle
+    sox_wav(f'{d}/34_homing_whine.wav',
+        'synth','0.20','sine','400:900',
+        'fade','h','0.02','0.20','0.04', 'gain','-5')
+
+    # 35 — mechanical enemy hit: metallic clank
+    sox_wav(f'{d}/35_enemy_hit_mech.wav',
+        'synth','0.08','sine','800:200',
+        'overdrive','20','25',
+        'fade','h','0','0.08','0.02', 'gain','-4')
+
+    # 36 — mechanical enemy die: grinding halt
+    sox_wav(f'{d}/36_enemy_die_mech.wav',
+        'synth','0.30','sine','400:40',
+        'overdrive','15','20',
+        'echo','0.4','0.3','50','0.4',
+        'fade','h','0','0.38','0.08', 'gain','-3')
+
+    # 37 — digital enemy hit: glitch stutter
+    sox_wav(f'{d}/37_enemy_hit_digi.wav',
+        'synth','0.06','sine','1200:400',
+        'echo','0.3','0.2','15','0.3',
+        'fade','h','0','0.08','0.02', 'gain','-4')
+
+    # 38 — digital enemy die: data dissolution
+    sox_wav(f'{d}/38_enemy_die_digi.wav',
+        'synth','0.25','sine','900:100',
+        'echo','0.5','0.4','30','0.5',
+        'fade','h','0','0.32','0.07', 'gain','-3')
+
 
 # ── MOD tracker music ────────────────────────────────────────────────────────
 # 2 channels only: ch0 = melody (smp 1), ch1 = bass (smp 2).

@@ -92,6 +92,7 @@ static int flash_timer = 0;
 static u16 flash_backup[16];    /* saved palette for restore */
 
 void video_hit_flash_start(int pal_bank, int frames) {
+    if (pal_bank < 0 || pal_bank >= 16) return;
     /* Save original palette and overwrite with white */
     if (flash_timer > 0 && flash_bank >= 0) {
         /* Restore previous flash first */
@@ -133,19 +134,21 @@ void video_blend_clear(void) {
 
 /* ---- Mosaic ---- */
 
+/* REG_MOSAIC is write-only on GBA — must shadow the value in RAM */
+static u16 mosaic_shadow = 0;
+
 void video_mosaic_obj(int size) {
-    u16 reg = (u16)REG_MOSAIC;
-    reg = (u16)((reg & 0x00FF) | ((size & 0xF) << 8) | ((size & 0xF) << 12));
-    REG_MOSAIC = reg;
+    mosaic_shadow = (u16)((mosaic_shadow & 0x00FF) | ((size & 0xF) << 8) | ((size & 0xF) << 12));
+    REG_MOSAIC = mosaic_shadow;
 }
 
 void video_mosaic_bg(int size) {
-    u16 reg = (u16)REG_MOSAIC;
-    reg = (u16)((reg & 0xFF00) | ((size & 0xF) << 0) | ((size & 0xF) << 4));
-    REG_MOSAIC = reg;
+    mosaic_shadow = (u16)((mosaic_shadow & 0xFF00) | ((size & 0xF) << 0) | ((size & 0xF) << 4));
+    REG_MOSAIC = mosaic_shadow;
 }
 
 void video_mosaic_clear(void) {
+    mosaic_shadow = 0;
     REG_MOSAIC = 0;
 }
 
@@ -187,7 +190,7 @@ int video_transition_update(void) {
     trans_timer++;
 
     if (trans_type == 1) {
-        /* Fade to black */
+        /* Fade to white */
         int level = trans_timer * 16 / trans_duration;
         if (level > 16) level = 16;
         REG_BLDY = (u16)level;
@@ -225,4 +228,27 @@ int video_transition_update(void) {
     }
 
     return 1;
+}
+
+void video_reset_effects(void) {
+    /* Restore palette if a hit flash was in progress */
+    if (flash_timer > 0 && flash_bank >= 0 && flash_bank < 16) {
+        memcpy16(&pal_obj_mem[flash_bank * 16], flash_backup, 16);
+    }
+    /* Clear all effect state */
+    shake_timer = 0;
+    shake_intensity = 0;
+    shake_offset = 0;
+    flash_bank = -1;
+    flash_timer = 0;
+    trans_type = 0;
+    trans_timer = 0;
+    trans_duration = 0;
+    flash_flash = 0;
+    flash_fade = 0;
+    mosaic_shadow = 0;
+    REG_MOSAIC = 0;
+    REG_BLDCNT = 0;
+    REG_BLDALPHA = 0;
+    REG_BLDY = 0;
 }

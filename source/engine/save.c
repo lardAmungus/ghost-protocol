@@ -30,12 +30,19 @@ void save_write_slot(SaveData* data, int slot) {
     const u8* src = (const u8*)data;
     int offset = slot * SAVE_SLOT_SIZE;
 
-    u16 ime_prev = REG_IME;
-    REG_IME = 0;
-    for (int i = 0; i < (int)sizeof(SaveData); i++) {
-        SRAM[offset + i] = src[i];
+    /* Write in 32-byte chunks, re-enabling interrupts between chunks
+     * so Maxmod can service its Timer 0 audio DMA IRQ */
+    int total = (int)sizeof(SaveData);
+    for (int base = 0; base < total; base += 32) {
+        int end = base + 32;
+        if (end > total) end = total;
+        u16 ime_prev = REG_IME;
+        REG_IME = 0;
+        for (int i = base; i < end; i++) {
+            SRAM[offset + i] = src[i];
+        }
+        REG_IME = ime_prev;
     }
-    REG_IME = ime_prev;
 }
 
 int save_read_slot(SaveData* data, int slot) {

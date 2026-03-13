@@ -12,4 +12,7 @@ void state_terminal_reset(void);
 /* Load a save slot and mark terminal as initialized (call before STATE_TERMINAL for CONTINUE). */
 void state_terminal_preload_slot(int slot);
 
+/* Save current game state to a slot (0-2). */
+void state_terminal_save_current(int slot);
+
 #endif /* STATES_STATE_TERMINAL_H */
