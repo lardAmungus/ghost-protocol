@@ -393,8 +393,8 @@ static void gen_arena(int sect_x, int tier) {
 
     /* Breakable blocks as cover (higher tiers) */
     if (tier > 2) {
-        set_tile(sect_x + 7, 25, NTILE_BREAKABLE, TILE_SOLID);
-        set_tile(sect_x + 8, 25, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(sect_x + 7, 25, NTILE_BREAKABLE, TILE_BREAKABLE);
+        set_tile(sect_x + 8, 25, NTILE_BREAKABLE, TILE_BREAKABLE);
     }
 
     /* Decorative: wall detail (walls are already TILE_SOLID, decorations
@@ -526,7 +526,7 @@ static void gen_corridor(int sect_x, int tier) {
     /* Breakable block obstacle */
     if (tier > 1 && lrng_range(3) == 0) {
         int bx = sect_x + 6 + lrng_range(4);
-        set_tile(bx, 27, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(bx, 27, NTILE_BREAKABLE, TILE_BREAKABLE);
     }
     /* Glitch artifact decoration */
     if (lrng_range(2) == 0) {
@@ -696,7 +696,7 @@ static void gen_maze(int sect_x, int tier) {
     /* Breakable walls in maze paths (block shortcuts) */
     if (tier > 1) {
         int bpath = lrng_range(3);
-        set_tile(sect_x + 7, paths[bpath], NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(sect_x + 7, paths[bpath], NTILE_BREAKABLE, TILE_BREAKABLE);
     }
     /* Glitch artifacts in open space */
     if (lrng_range(2) == 0)
@@ -714,9 +714,9 @@ static void gen_maze(int sect_x, int tier) {
 }
 
 static void gen_boss(int sect_x, int tier) {
-    /* Boss arena — special boss floor */
+    /* Boss arena — special boss floor (MUST use set_tile for collision) */
     for (int x = sect_x; x < sect_x + 16 && x < NET_MAP_W; x++) {
-        set_visual_tile(x, 28, NTILE_BOSS_FLOOR);
+        set_tile(x, 28, NTILE_BOSS_FLOOR, TILE_SOLID);
     }
     /* Ceiling with arena border */
     fill_solid(sect_x, 0, 16, 2);
@@ -1106,13 +1106,13 @@ static void gen_cache(int sect_x, int tier) {
     int room_x = sect_x + 8;
     int room_y = 18;
     for (int bx = room_x; bx < room_x + 6 && bx < NET_MAP_W; bx++) {
-        set_tile(bx, room_y, NTILE_BREAKABLE, TILE_SOLID);
-        set_tile(bx, room_y + 4, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(bx, room_y, NTILE_BREAKABLE, TILE_BREAKABLE);
+        set_tile(bx, room_y + 4, NTILE_BREAKABLE, TILE_BREAKABLE);
     }
     for (int by = room_y + 1; by < room_y + 4; by++) {
-        set_tile(room_x, by, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(room_x, by, NTILE_BREAKABLE, TILE_BREAKABLE);
         if (room_x + 5 < NET_MAP_W)
-            set_tile(room_x + 5, by, NTILE_BREAKABLE, TILE_SOLID);
+            set_tile(room_x + 5, by, NTILE_BREAKABLE, TILE_BREAKABLE);
     }
     /* Circuit floor inside room */
     for (int bx = room_x + 1; bx < room_x + 5 && bx < NET_MAP_W; bx++)
@@ -1166,8 +1166,8 @@ static void gen_cache(int sect_x, int tier) {
 
     /* Additional breakable at higher tiers */
     if (tier > 2) {
-        set_tile(sect_x + 3, 24, NTILE_BREAKABLE, TILE_SOLID);
-        set_tile(sect_x + 3, 25, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(sect_x + 3, 24, NTILE_BREAKABLE, TILE_BREAKABLE);
+        set_tile(sect_x + 3, 25, NTILE_BREAKABLE, TILE_BREAKABLE);
     }
 }
 
@@ -1317,8 +1317,8 @@ static void gen_gauntlet(int sect_x, int tier) {
         add_platform(sect_x + 7, 16, 3);
         add_platform(sect_x + 11, 22, 3);
         /* Breakable cover blocks */
-        set_tile(sect_x + 5, 27, NTILE_BREAKABLE, TILE_SOLID);
-        set_tile(sect_x + 10, 27, NTILE_BREAKABLE, TILE_SOLID);
+        set_tile(sect_x + 5, 27, NTILE_BREAKABLE, TILE_BREAKABLE);
+        set_tile(sect_x + 10, 27, NTILE_BREAKABLE, TILE_BREAKABLE);
         /* Wall greeble */
         set_visual_tile(sect_x + 1, 10, NTILE_CORRIDOR_GREEBLE);
         set_visual_tile(sect_x + 14, 14, NTILE_CORRIDOR_GREEBLE);

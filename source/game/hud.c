@@ -308,7 +308,6 @@ void hud_draw(void) {
             if (secs > 9) secs = 9;
             text_put_char(col + 2, 2, (char)('0' + secs));
             col += 4;
-            col += 3;
         }
         if (ability_is_firewall_active() && col < 11) {
             text_put_char(col, 2, 'F');

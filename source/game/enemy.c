@@ -930,7 +930,7 @@ static void ai_drone(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
         /* Erratic: oscillate vertically while pursuing horizontally */
         e->vx = (s16)(dx > 0 ? 192 : -192);
         ai->state_timer++;
-        int sine_ofs = ((ai->state_timer & 16) > 8) ? 128 : -128;
+        int sine_ofs = ((ai->state_timer & 15) >= 8) ? 128 : -128;
         e->vy = (s16)(sine_ofs + (dy > 0 ? 64 : -64));
     } else {
         ai->state = ESTATE_IDLE;
@@ -1078,7 +1078,7 @@ static void ai_bomber(Entity* e, EnemyAI* ai, s32 player_x, s32 player_y) {
 
         /* Drop bomb every 90 frames when roughly above player */
         ai->shoot_timer++;
-        if (ai->shoot_timer >= 90 && dist < 16) {
+        if (ai->shoot_timer >= 90 && dist < 48) {
             ai->shoot_timer = 0;
             int ent_idx = (int)(e - entity_get(0));
             projectile_spawn(

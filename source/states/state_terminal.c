@@ -545,12 +545,16 @@ static void update_inventory(void) {
     }
 
     if (input_hit(KEY_R)) {
-        /* Sell selected item */
+        /* Sell selected item (cannot sell equipped) */
         int idx = 0;
         for (int i = 0; i < INVENTORY_SIZE; i++) {
             LootItem* item = inventory_get(i);
             if (item) {
                 if (idx == cursor) {
+                    if (item->flags & LOOT_FLAG_EQUIPPED) {
+                        audio_play_sfx(SFX_MENU_BACK);
+                        break;
+                    }
                     int value = shop_sell(i);
                     if (value > 0) {
                         audio_play_sfx(SFX_PICKUP);

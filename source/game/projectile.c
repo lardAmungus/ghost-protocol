@@ -401,8 +401,9 @@ void projectile_update_all(void) {
             continue;
         }
 
-        /* Wall collision (unless PHASE flag or NOVA/HOMING) */
-        if (!(p->flags & PROJ_PHASE) && p->type != SUBTYPE_PROJ_NOVA) {
+        /* Wall collision (unless PHASE flag, NOVA, or HOMING) */
+        if (!(p->flags & PROJ_PHASE) && p->type != SUBTYPE_PROJ_NOVA &&
+            p->type != SUBTYPE_PROJ_HOMING) {
             int tile = collision_tile_at(px + 4, py + 4);
             if (tile == TILE_SOLID || tile == TILE_BREAKABLE) {
                 /* Break breakable walls (player projectiles only) */

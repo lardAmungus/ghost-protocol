@@ -113,14 +113,14 @@ static void check_projectile_vs_player(void) {
         if (!(p->flags & PROJ_ACTIVE)) continue;
         if (!(p->flags & PROJ_ENEMY)) continue;
 
-        /* Simple AABB check */
+        /* Proper AABB: projectile 8x8 vs player hitbox */
         int px = p->x >> 8;
         int py = p->y >> 8;
         int ex = player->x >> 8;
         int ey = player->y >> 8;
 
-        if (px >= ex && px <= ex + (int)player->width &&
-            py >= ey && py <= ey + (int)player->height) {
+        if (px + 8 > ex && px < ex + (int)player->width &&
+            py + 8 > ey && py < ey + (int)player->height) {
             /* Hit! */
             s16 kb = (p->vx > 0) ? 128 : -128;
             player_take_damage(p->damage, kb, -64);
@@ -583,10 +583,10 @@ static void update_play(void) {
         }
     }
 
-    /* Death plane: teleport player back if near world bottom */
-    if (p && player_is_alive()) {
+    /* Death plane: teleport player back if falling near world bottom */
+    if (p && player_is_alive() && !p->on_ground && p->vy > 0) {
         int player_py = (int)(p->y >> 8);
-        if (player_py >= NET_MAP_PY - 16) {
+        if (player_py >= NET_MAP_PY - 12) {
             player_take_damage(3, 0, -128);
             p->x = player_state.last_safe_x;
             p->y = player_state.last_safe_y;
@@ -601,7 +601,8 @@ static void update_play(void) {
     if (p && player_is_alive() && hazard_cd == 0 && player_state.invincible_timer == 0) {
         int ppx = (int)(p->x >> 8) + (int)(p->width >> 1);
         int ppy = (int)(p->y >> 8) + (int)p->height - 2;
-        if (collision_point_hazard(ppx, ppy)) {
+        if (collision_point_hazard(ppx, ppy) &&
+            collision_tile_at(ppx, ppy) != TILE_CORRUPT) {
             int haz_dmg = 3;
             if (player_state.armor_flags & AFLAG_HAZARD_RESIST) haz_dmg = 1;
             player_take_damage(haz_dmg, 0, -128);
