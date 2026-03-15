@@ -122,16 +122,31 @@ static int epilogue_typewriter(void) {
 }
 
 static void draw_credits_scrolling(void) {
-    /* Credits are placed at rows 22+ (off-screen bottom) and scroll up */
-    /* We write all credit text once, then scroll BG0 */
+    /* Credits are placed at rows 22+ (off-screen bottom) and scroll up.
+     * text_print has a ty<20 guard, so write directly to BG0 screenblock. */
     if (timer == 1) {
-        /* Place credits below visible area (rows 22-31 wrap in 32-row BG) */
-        text_print(6, 22, "- CREDITS -");
-        text_print(6, 24, "Ghost Protocol");
-        text_print(4, 26, "A GBA Game by You");
-        text_print(4, 28, "Engine: libtonc");
-        text_print(4, 29, "Audio: Maxmod");
-        text_print(4, 30, "Build: devkitARM");
+        /* Write credits below visible area (rows 22-31 in 32-row BG) */
+        {
+            static const struct { int col; int row; const char* str; } cred[] = {
+                {6, 22, "- CREDITS -"},
+                {6, 24, "Ghost Protocol"},
+                {4, 26, "A GBA Game by You"},
+                {4, 28, "Engine: libtonc"},
+                {4, 29, "Audio: Maxmod"},
+                {4, 30, "Build: devkitARM"},
+            };
+            for (int c = 0; c < 6; c++) {
+                const char* s = cred[c].str;
+                int x = cred[c].col;
+                int y = cred[c].row & 31; /* wrap within 32-row tilemap */
+                while (*s) {
+                    int ch = *s - ' ';
+                    if (ch < 0 || ch >= 95) ch = 0;
+                    se_mem[31][y * 32 + x] = (u16)(ch);
+                    x++; s++;
+                }
+            }
+        }
 
         /* Stats in visible area (rows 4-7) */
         text_print(4, 4, "MISSION COMPLETE");

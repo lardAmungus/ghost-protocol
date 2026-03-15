@@ -237,9 +237,9 @@ static void apply_skill_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck)
 }
 
 static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    /* Reset armor passive flags and regen timer */
+    /* Reset armor passive flags (preserve regen timer if regen stays active) */
+    u8 had_regen = player_state.armor_flags & AFLAG_HP_REGEN;
     player_state.armor_flags = 0;
-    player_state.armor_regen_timer = 0;
 
     /* Armor DEF bonus + passive effects based on subtype */
     LootItem* armor = inventory_get_equipped_armor();
@@ -304,9 +304,11 @@ static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* 
         default: break; /* Crit/XP/Credit/Ammo/Phase read at use site */
         }
     }
-}
 
-void player_recompute_stats(void);  /* forward decl for public API */
+    /* Reset regen timer only when regen flag was lost */
+    if (had_regen && !(player_state.armor_flags & AFLAG_HP_REGEN))
+        player_state.armor_regen_timer = 0;
+}
 
 static void compute_stats(void) {
     int cls = player_state.player_class;

@@ -1498,7 +1498,8 @@ void enemy_damage(Entity* e, int dmg) {
     } else {
         kb = (dmg >= 10) ? 192 : 128;
     }
-    e->vx = (s16)(e->facing ? kb : -kb);
+    /* Knock away from facing direction (away from player they're looking at) */
+    e->vx = (s16)(e->facing ? -kb : kb);
     e->vy = stationary ? 0 : -64;
 
     if (e->hp <= 0) {

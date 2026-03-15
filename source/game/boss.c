@@ -20,6 +20,7 @@
 #include "engine/rng.h"
 #include "game/particle.h"
 #include "game/abilities.h"
+#include "game/loot.h"
 
 BossState boss_state;
 
@@ -361,6 +362,8 @@ void boss_spawn(int boss_type, int tier) {
             base_hp = base_hp * (10 + game_stats.bb_threat_level) / 10;
             base_atk = base_atk * (10 + game_stats.bb_threat_level) / 10;
         }
+        if (base_hp > 30000) base_hp = 30000;
+        if (base_atk > 30000) base_atk = 30000;
         boss_state.hp = (s16)base_hp;
         boss_state.max_hp = boss_state.hp;
         boss_state.atk = (s16)base_atk;
@@ -1065,9 +1068,9 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
             e->on_ground = (u8)collision_check_ground(px, py + e->height - 1, e->width);
         }
 
-        /* Arena bounds — confine boss to last 25% of map (tiles 192-255) */
+        /* Arena bounds — confine boss to last section (tiles 240-255) */
         {
-            int arena_min_x = (NET_MAP_W * 3 / 4) * 8 * 256; /* tile 192 */
+            int arena_min_x = (NUM_SECTIONS - 1) * 16 * 8 * 256; /* tile 240 */
             int arena_max_x = (NET_MAP_W * 8 - e->width) * 256;
             int arena_max_y = (NET_MAP_H * 8 - e->height) * 256;
             if (e->x < arena_min_x) { e->x = arena_min_x; e->vx = 0; }
@@ -1245,6 +1248,18 @@ IWRAM_CODE int boss_check_player_attack(Entity* player) {
 
             int dmg = p->damage;
 
+            /* Critical hit check: base 5% + LCK/2% + skill tree */
+            int is_crit = 0;
+            {
+                int crit_chance = 5 + player_state.lck / 2;
+                crit_chance += player_state.skill_tree[0] * 3;
+                LootItem* crit_acc = inventory_get_equipped_accessory();
+                if (crit_acc && LOOT_SUBTYPE(crit_acc->type) == ACC_CRIT_LENS)
+                    crit_chance += crit_acc->stat1;
+                is_crit = ((int)rand_range(100) < crit_chance);
+                if (is_crit) dmg *= 2;
+            }
+
             /* Upload (Technomancer ability): 2x damage */
             if (ability_is_upload_active()) dmg *= 2;
 
@@ -1263,6 +1278,11 @@ IWRAM_CODE int boss_check_player_attack(Entity* player) {
 
             boss_damage(dmg);
             total_dmg += dmg;
+
+            if (is_crit) {
+                hud_notify("CRIT!", 20);
+                video_shake(3, 1);
+            }
 
             if (!(p->flags & PROJ_PIERCE)) {
                 projectile_deactivate(p);
@@ -1283,6 +1303,8 @@ void boss_damage(int dmg) {
         for (int i = 0; i < boss_state.hit_count && i < 6; i++)
             scale = scale * 217 >> 8; /* 217/256 ≈ 0.85 */
         actual = dmg * scale >> 8;
+        /* Floor: vulnerability damage never less than non-vuln (50%) */
+        if (actual < (dmg + 1) >> 1) actual = (dmg + 1) >> 1;
         if (actual < 1) actual = 1;
     } else if (boss_state.phase != BPHASE_DEAD) {
         if (dmg > 0) {

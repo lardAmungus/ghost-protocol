@@ -372,10 +372,13 @@ int craft_fuse(int idx1, int idx2, int idx3) {
 
     /* Remove consumed items, place result */
     u8 was_equipped = a->flags & LOOT_FLAG_EQUIPPED;
+    u8 old_cat = LOOT_CATEGORY(a->type);
     inventory_remove(idx2);
     inventory_remove(idx3);
     inv_items[idx1] = result;
-    if (was_equipped) inv_items[idx1].flags |= LOOT_FLAG_EQUIPPED;
+    /* Only preserve equipped flag if result is same category */
+    if (was_equipped && LOOT_CATEGORY(result.type) == old_cat)
+        inv_items[idx1].flags |= LOOT_FLAG_EQUIPPED;
 
     audio_play_sfx(SFX_CRAFT_SUCCESS);
     hud_notify("FUSED!", 60);
