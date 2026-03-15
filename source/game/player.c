@@ -237,8 +237,9 @@ static void apply_skill_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck)
 }
 
 static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    /* Reset armor passive flags */
+    /* Reset armor passive flags and regen timer */
     player_state.armor_flags = 0;
+    player_state.armor_regen_timer = 0;
 
     /* Armor DEF bonus + passive effects based on subtype */
     LootItem* armor = inventory_get_equipped_armor();
@@ -305,6 +306,8 @@ static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* 
     }
 }
 
+void player_recompute_stats(void);  /* forward decl for public API */
+
 static void compute_stats(void) {
     int cls = player_state.player_class;
     int lvl = player_state.level;
@@ -323,6 +326,10 @@ static void compute_stats(void) {
     apply_equipment_bonuses(&player_state.max_hp, &player_state.atk,
                             &player_state.def, &player_state.spd,
                             &player_state.lck);
+}
+
+void player_recompute_stats(void) {
+    compute_stats();
 }
 
 static void check_ability_unlocks(void) {
@@ -434,17 +441,16 @@ static void do_shoot(void) {
         /* Weapon adds to damage and modifies fire rate */
         dmg += weapon->stat1;
         base_cooldown = weapon->stat2; /* Lower = faster */
+        /* Ammo Belt accessory: reduce fire cooldown */
+        {
+            LootItem* ammo_acc = inventory_get_equipped_accessory();
+            if (ammo_acc && LOOT_SUBTYPE(ammo_acc->type) == ACC_AMMO_BELT) {
+                base_cooldown -= ammo_acc->stat1 / 2;
+                if (base_cooldown < 1) base_cooldown = 1;
+            }
+        }
     } else {
         base_cooldown = 0; /* No weapon = use class default */
-    }
-
-    /* Ammo Belt accessory: reduce fire cooldown */
-    {
-        LootItem* ammo_acc = inventory_get_equipped_accessory();
-        if (ammo_acc && LOOT_SUBTYPE(ammo_acc->type) == ACC_AMMO_BELT) {
-            base_cooldown -= ammo_acc->stat1 / 2;
-            if (base_cooldown < 1) base_cooldown = 1;
-        }
     }
 
     /* Berserk (Assault ability): ATK x1.5 while active */
@@ -699,7 +705,7 @@ void player_update(void) {
             int foot_x = (int)(p_ent->x >> 8) + p_ent->width / 2;
             int foot_y = (int)(p_ent->y >> 8) + p_ent->height;
             int tile = collision_tile_at(foot_x, foot_y);
-            if (tile == TILE_SOLID || tile == TILE_BREAKABLE) {
+            if (tile == TILE_SOLID || tile == TILE_BREAKABLE || tile == TILE_PLATFORM) {
                 player_state.last_safe_x = p_ent->x;
                 player_state.last_safe_y = p_ent->y;
             }

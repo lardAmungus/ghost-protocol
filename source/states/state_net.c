@@ -513,7 +513,7 @@ static void update_play(void) {
                 s16 kb = (p->x > e->x) ? 128 : -128;
                 player_take_damage(enemy_get_atk(e), kb, -64);
                 /* Quantum Guard: reflect damage back to enemy on contact */
-                if (player_state.armor_flags & AFLAG_REFLECT) {
+                if (player_is_alive() && (player_state.armor_flags & AFLAG_REFLECT)) {
                     LootItem* ref_armor = inventory_get_equipped_armor();
                     if (ref_armor) {
                         int ref_dmg = ref_armor->stat1 / 6;
@@ -532,7 +532,7 @@ static void update_play(void) {
             s16 kb = (p->x > be->x) ? 128 : -128;
             player_take_damage(boss_state.atk, kb, -64);
             /* Quantum Guard: reflect damage back to boss on contact */
-            if (player_state.armor_flags & AFLAG_REFLECT) {
+            if (player_is_alive() && (player_state.armor_flags & AFLAG_REFLECT)) {
                 LootItem* ref_armor = inventory_get_equipped_armor();
                 if (ref_armor) {
                     int ref_dmg = ref_armor->stat1 / 6;

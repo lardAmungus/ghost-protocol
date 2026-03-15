@@ -185,6 +185,7 @@ static void unpack_save(const SaveData* sd) {
     if (sd->equipped_idx < INVENTORY_SIZE && sd->equipped_idx < sd->inventory_count) {
         inventory_equip(sd->equipped_idx);
     }
+    player_recompute_stats();
 
     /* Restore shop state */
     shop_set_purchases(sd->shop_purchases, SHOP_ITEM_COUNT);
@@ -533,6 +534,7 @@ static void update_inventory(void) {
             if (item) {
                 if (idx == cursor) {
                     inventory_equip(i);
+                    player_recompute_stats();
                     audio_play_sfx(SFX_PICKUP);
                     text_clear_all();
                     break;

@@ -120,6 +120,9 @@ int player_skill_allocate(int index);
  * branch: 0=offense, 1=defense, 2=utility */
 int player_get_skill_bonus(int branch, int skill_idx);
 
+/* Recompute all stats from base + equipment + skills. Call after equip changes. */
+void player_recompute_stats(void);
+
 /* Apply evolution choice (1 or 2 for the class). Returns 1 on success. */
 int player_apply_evolution(int choice);
 
