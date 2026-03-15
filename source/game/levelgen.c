@@ -1445,6 +1445,13 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
         }
     }
 
+    /* PASS 0: Safety floor — ensure absolute bottom row is solid */
+    for (int x = 0; x < NET_MAP_W; x++) {
+        if (level_data.collision[31 * NET_MAP_W + x] == TILE_EMPTY) {
+            set_tile(x, 31, NTILE_WALL, TILE_SOLID);
+        }
+    }
+
     /* PASS 1: Fill solid below each column's lowest floor to prevent void.
      * Must run BEFORE stitch pass so that stitch can detect floor surfaces
      * correctly and carve through the filled area. */

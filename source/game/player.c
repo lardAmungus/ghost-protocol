@@ -17,13 +17,15 @@
 #include "game/particle.h"
 #include "game/enemy.h"
 #include "engine/entity.h"
+#include "engine/rng.h"
 #include <string.h>
 
 PlayerState player_state;
 GameStats game_stats;
 static Entity* p_ent = NULL;
 static int selected_ability = 0; /* Currently selected ability slot (0-7) */
-static int coyote_timer = 0;     /* Frames since leaving ground (4 = coyote window) */
+#define COYOTE_FRAMES 6
+static int coyote_timer = 0;     /* Frames since leaving ground */
 
 /* ---- Player sprite data (16x16, 4 tiles per frame) ---- */
 /* 6 frames: idle0, idle1, run0, run1, jump, shoot */
@@ -235,10 +237,56 @@ static void apply_skill_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck)
 }
 
 static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    /* Armor DEF bonus */
+    /* Reset armor passive flags */
+    player_state.armor_flags = 0;
+
+    /* Armor DEF bonus + passive effects based on subtype */
     LootItem* armor = inventory_get_equipped_armor();
     if (armor) {
-        *def = (s16)(*def + armor->stat1);
+        int asub = LOOT_SUBTYPE(armor->type);
+        int aval = armor->stat1;
+        switch (asub) {
+        case ARMOR_DATA_VEST:
+            *def = (s16)(*def + aval);
+            break;
+        case ARMOR_FIREWALL:
+            *def = (s16)(*def + aval);
+            player_state.armor_flags |= AFLAG_HAZARD_RESIST;
+            break;
+        case ARMOR_NEURAL_PLATE:
+            *def = (s16)(*def + aval * 3 / 2);
+            break;
+        case ARMOR_STEALTH_SUIT:
+            *def = (s16)(*def + aval);
+            *spd = (s16)(*spd + aval / 3);
+            break;
+        case ARMOR_CIRCUIT_WEAVE:
+            *def = (s16)(*def + aval);
+            player_state.armor_flags |= AFLAG_HP_REGEN;
+            break;
+        case ARMOR_PLATING:
+            *def = (s16)(*def + aval * 2);
+            break;
+        case ARMOR_NANO_MESH:
+            *def = (s16)(*def + aval);
+            player_state.armor_flags |= AFLAG_DAMAGE_RESIST;
+            break;
+        case ARMOR_PHASE_SHELL:
+            *def = (s16)(*def + aval);
+            player_state.armor_flags |= AFLAG_DODGE_CHANCE;
+            break;
+        case ARMOR_QUANTUM_GUARD:
+            *def = (s16)(*def + aval);
+            player_state.armor_flags |= AFLAG_REFLECT;
+            break;
+        case ARMOR_TITAN_FRAME:
+            *def = (s16)(*def + aval * 5 / 2);
+            player_state.armor_flags |= AFLAG_KB_RESIST;
+            break;
+        default:
+            *def = (s16)(*def + aval);
+            break;
+        }
     }
 
     /* Accessory bonuses */
@@ -251,7 +299,8 @@ static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* 
         case ACC_LUCKY_CHIP:    *lck = (s16)(*lck + val); break;
         case ACC_SHIELD_CELL:   *hp  = (s16)(*hp + val * 3); break;
         case ACC_POWER_CELL:    *atk = (s16)(*atk + val); break;
-        default: break; /* Other accessories have non-stat effects */
+        case ACC_REGEN_CORE:    player_state.armor_flags |= AFLAG_HP_REGEN; break;
+        default: break; /* Crit/XP/Credit/Ammo/Phase read at use site */
         }
     }
 }
@@ -327,6 +376,10 @@ void player_init(int player_class) {
     p_ent->height = PLAYER_HITBOX_H;
     p_ent->facing = FACING_RIGHT;
 
+    /* Init safe position to spawn point (death plane fallback) */
+    player_state.last_safe_x = p_ent->x;
+    player_state.last_safe_y = p_ent->y;
+
     /* Allocate OAM sprite (16x16) */
     int oam = sprite_alloc();
     if (oam >= 0) {
@@ -383,6 +436,15 @@ static void do_shoot(void) {
         base_cooldown = weapon->stat2; /* Lower = faster */
     } else {
         base_cooldown = 0; /* No weapon = use class default */
+    }
+
+    /* Ammo Belt accessory: reduce fire cooldown */
+    {
+        LootItem* ammo_acc = inventory_get_equipped_accessory();
+        if (ammo_acc && LOOT_SUBTYPE(ammo_acc->type) == ACC_AMMO_BELT) {
+            base_cooldown -= ammo_acc->stat1 / 2;
+            if (base_cooldown < 1) base_cooldown = 1;
+        }
     }
 
     /* Berserk (Assault ability): ATK x1.5 while active */
@@ -575,6 +637,9 @@ void player_update(void) {
 
     /* Hit stun */
     if (player_state.state == PSTATE_HIT) {
+        /* Knockback deceleration — bleed off velocity during stun */
+        if (p_ent->vx > 0) { p_ent->vx -= 16; if (p_ent->vx < 0) p_ent->vx = 0; }
+        else if (p_ent->vx < 0) { p_ent->vx += 16; if (p_ent->vx > 0) p_ent->vx = 0; }
         physics_update(p_ent, phys);
         if (player_state.invincible_timer < 50) {
             player_state.state = PSTATE_IDLE;
@@ -629,10 +694,23 @@ void player_update(void) {
         }
         player_state.jumps_remaining = phys->max_jumps;
         coyote_timer = 0;
+        /* Track last safe ground position (solid tile, not platform) */
+        {
+            int foot_x = (int)(p_ent->x >> 8) + p_ent->width / 2;
+            int foot_y = (int)(p_ent->y >> 8) + p_ent->height;
+            int tile = collision_tile_at(foot_x, foot_y);
+            if (tile == TILE_SOLID || tile == TILE_BREAKABLE) {
+                player_state.last_safe_x = p_ent->x;
+                player_state.last_safe_y = p_ent->y;
+            }
+        }
     } else {
-        /* Coyote time: 4 frames after leaving ground where jump still counts */
+        /* Coyote time */
         if (coyote_timer < 255) coyote_timer++;
     }
+
+    /* Jump buffer: decrement each frame */
+    if (player_state.jump_buffer > 0) player_state.jump_buffer--;
     if (!p_ent->on_ground && !keep_shoot) {
         if (p_ent->on_wall) {
             if (player_state.state != PSTATE_WALL_SLIDE)
@@ -682,33 +760,40 @@ void player_update(void) {
         }
     }
 
-    /* Jump (with 4-frame coyote time) */
-    if (input_hit(KEY_A)) {
-        if (p_ent->on_ground || coyote_timer <= 4) {
-            /* Normal/coyote jump */
-            p_ent->vy = phys->jump_vel;
-            player_state.jumps_remaining = (u8)(phys->max_jumps - 1);
-            p_ent->on_ground = 0;
-            coyote_timer = 255; /* Consume coyote window */
-            audio_play_sfx(SFX_JUMP);
-        } else if (p_ent->on_wall && phys->can_wall_jump) {
-            /* Wall jump */
-            p_ent->vy = phys->wall_jump_vy;
-            /* Kick away from wall */
-            int wall_side = physics_check_wall(p_ent, -1) ? -1 : 1;
-            p_ent->vx = (wall_side < 0) ? phys->wall_jump_vx : -phys->wall_jump_vx;
-            p_ent->facing = (wall_side < 0) ? FACING_RIGHT : FACING_LEFT;
-            player_state.jumps_remaining = (u8)(phys->max_jumps - 1);
-            audio_play_sfx(SFX_WALL_JUMP);
-        } else if (player_state.jumps_remaining > 0) {
-            /* Double jump (Infiltrator) */
-            p_ent->vy = (s16)(phys->jump_vel * 7 / 8);
-            player_state.jumps_remaining--;
-            audio_play_sfx(SFX_DOUBLE_JUMP);
-            /* Sparkle burst at feet */
-            particle_burst(p_ent->x + ((s32)p_ent->width << 7),
-                           p_ent->y + FP8(12),
-                           3, PART_STAR, 140, 12);
+    /* Jump buffer: store press while airborne */
+    if (input_hit(KEY_A)) player_state.jump_buffer = 6;
+
+    /* Jump (with coyote time + jump buffer) */
+    {
+        int want_jump = input_hit(KEY_A) || player_state.jump_buffer > 0;
+        if (want_jump) {
+            if (p_ent->on_ground || coyote_timer <= COYOTE_FRAMES) {
+                /* Normal/coyote jump */
+                p_ent->vy = phys->jump_vel;
+                player_state.jumps_remaining = (u8)(phys->max_jumps - 1);
+                p_ent->on_ground = 0;
+                coyote_timer = 255; /* Consume coyote window */
+                player_state.jump_buffer = 0;
+                audio_play_sfx(SFX_JUMP);
+            } else if (p_ent->on_wall && phys->can_wall_jump) {
+                /* Wall jump */
+                p_ent->vy = phys->wall_jump_vy;
+                int wall_side = physics_check_wall(p_ent, -1) ? -1 : 1;
+                p_ent->vx = (wall_side < 0) ? phys->wall_jump_vx : -phys->wall_jump_vx;
+                p_ent->facing = (wall_side < 0) ? FACING_RIGHT : FACING_LEFT;
+                player_state.jumps_remaining = (u8)(phys->max_jumps - 1);
+                player_state.jump_buffer = 0;
+                audio_play_sfx(SFX_WALL_JUMP);
+            } else if (player_state.jumps_remaining > 0 && input_hit(KEY_A)) {
+                /* Double jump (Infiltrator) — only on fresh press, not buffer */
+                p_ent->vy = (s16)(phys->jump_vel * 7 / 8);
+                player_state.jumps_remaining--;
+                player_state.jump_buffer = 0;
+                audio_play_sfx(SFX_DOUBLE_JUMP);
+                particle_burst(p_ent->x + ((s32)p_ent->width << 7),
+                               p_ent->y + FP8(12),
+                               3, PART_STAR, 140, 12);
+            }
         }
     }
 
@@ -729,6 +814,15 @@ void player_update(void) {
         player_state.dash_timer == 0 && player_state.dash_cooldown == 0) {
         player_state.dash_timer = phys->dash_frames;
         p_ent->vx = p_ent->facing == FACING_LEFT ? -phys->dash_speed : phys->dash_speed;
+        /* Phase Ring accessory: boost dash speed */
+        {
+            LootItem* dash_acc = inventory_get_equipped_accessory();
+            if (dash_acc && LOOT_SUBTYPE(dash_acc->type) == ACC_PHASE_RING) {
+                s16 boost = (s16)(dash_acc->stat1 * 16);
+                if (p_ent->facing == FACING_LEFT) p_ent->vx = (s16)(p_ent->vx - boost);
+                else p_ent->vx = (s16)(p_ent->vx + boost);
+            }
+        }
         p_ent->vy = 0;
         player_state.state = PSTATE_DASH;
         /* Dash grants brief invincibility for dodge mechanics */
@@ -783,6 +877,15 @@ void player_update(void) {
     /* Abilities update */
     ability_update();
 
+    /* Armor passive: HP regen tick */
+    if (player_state.armor_flags & AFLAG_HP_REGEN) {
+        if (player_state.armor_regen_timer > 0) player_state.armor_regen_timer--;
+        else if (player_state.hp < player_state.max_hp) {
+            player_state.hp++;
+            player_state.armor_regen_timer = 120; /* 1 HP per 2 seconds */
+        }
+    }
+
     /* Projectiles updated by state_net_update — NOT here (avoid double-update) */
 }
 
@@ -791,6 +894,19 @@ void player_update(void) {
 void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
     if (!p_ent || player_state.invincible_timer > 0) return;
     if (player_state.state == PSTATE_DEAD) return;
+
+    /* Phase Shell: dodge chance (stat1/4 percent) */
+    if (player_state.armor_flags & AFLAG_DODGE_CHANCE) {
+        LootItem* dodge_armor = inventory_get_equipped_armor();
+        if (dodge_armor) {
+            int dodge_pct = dodge_armor->stat1 / 4;
+            if (dodge_pct > 0 && (int)rand_range(100) < dodge_pct) {
+                hud_notify("DODGE!", 20);
+                player_state.invincible_timer = 15;
+                return;
+            }
+        }
+    }
 
     /* Diminishing returns defense: actual = dmg * 256 / (256 + def * 8)
      * At DEF=16, reduces damage by ~33%. At DEF=32, ~50%. At DEF=64, ~67%. */
@@ -814,6 +930,12 @@ void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
     /* Skill tree: defense branch index 3 = resist (flat -1/-2/-3 damage) */
     actual -= player_state.skill_tree[7];
     if (actual < 1) actual = 1;
+
+    /* Nano Mesh: flat -1 damage resist */
+    if (player_state.armor_flags & AFLAG_DAMAGE_RESIST) {
+        actual--;
+        if (actual < 1) actual = 1;
+    }
 
     player_state.hp -= (s16)actual;
     /* Track damage taken stat */
@@ -841,6 +963,11 @@ void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
 
     p_ent->vx = kb_vx;
     p_ent->vy = kb_vy;
+    /* Titan Frame: halve knockback velocity */
+    if (player_state.armor_flags & AFLAG_KB_RESIST) {
+        p_ent->vx /= 2;
+        p_ent->vy /= 2;
+    }
     player_state.invincible_timer = 60;
     player_state.state = PSTATE_HIT;
     audio_play_sfx(SFX_PLAYER_HIT);
@@ -862,6 +989,12 @@ int player_xp_to_next(void) {
 void player_add_xp(int amount) {
     /* Skill tree: utility branch index 2 = XP bonus (+5/10/15%) */
     int xp_bonus = player_state.skill_tree[10] * 5;
+    /* XP Booster accessory */
+    {
+        LootItem* xp_acc = inventory_get_equipped_accessory();
+        if (xp_acc && LOOT_SUBTYPE(xp_acc->type) == ACC_XP_BOOSTER)
+            xp_bonus += xp_acc->stat1 * 3;
+    }
     if (xp_bonus > 0) amount = amount * (100 + xp_bonus) / 100;
     /* Use int accumulator to prevent u16 overflow/wrap */
     int xp = (int)player_state.xp + amount;

@@ -571,18 +571,431 @@ MUSIC_TRACKS = {
 }
 
 
+# ── Expanded SFX via parameterized generation ────────────────────────────────
+
+EXPANDED_SFX = []
+
+def _sfx(num, name, synth_type, freq_start, freq_end, dur, echo_params=None,
+          overdrive_params=None, fade_in=0, fade_out=0.05, gain=-3):
+    """Register a parameterized SFX."""
+    EXPANDED_SFX.append((num, name, synth_type, freq_start, freq_end, dur,
+                         echo_params, overdrive_params, fade_in, fade_out, gain))
+
+# --- Ambient / Environment (39-78) ---
+_sfx(39,'ambient_wind','sine',80,120,2.0,(0.6,0.5,200,0.6),None,0.1,0.3,-8)
+_sfx(40,'ambient_rain','sine',2000,200,1.5,(0.5,0.4,30,0.5),None,0.1,0.2,-6)
+_sfx(41,'ambient_static','sine',800,1200,1.0,(0.3,0.2,10,0.3),(8,10),0,0.1,-5)
+_sfx(42,'ambient_hum','sine',110,115,2.5,(0.7,0.6,100,0.7),None,0.2,0.3,-8)
+_sfx(43,'ambient_drip','sine',1400,200,0.3,(0.5,0.4,120,0.5),None,0,0.08,-4)
+_sfx(44,'ambient_sparks','sine',1800,400,0.2,(0.4,0.3,40,0.4),(12,15),0,0.04,-3)
+_sfx(45,'ambient_machinery','sine',150,160,2.0,(0.6,0.5,80,0.6),(6,8),0.1,0.2,-7)
+_sfx(46,'ambient_dataflow','sine',440,880,1.5,(0.5,0.4,60,0.5),None,0.05,0.15,-5)
+_sfx(47,'ambient_alarm','sine',800,800,0.8,(0.4,0.3,100,0.4),None,0,0.1,-4)
+_sfx(48,'ambient_ventilation','sine',200,220,2.0,(0.6,0.5,150,0.6),None,0.15,0.25,-8)
+_sfx(49,'ambient_electric_arc','sine',2200,600,0.15,(0.3,0.2,20,0.3),(15,20),0,0.03,-3)
+_sfx(50,'ambient_server_hum','sine',90,95,3.0,(0.7,0.6,120,0.7),None,0.2,0.4,-9)
+_sfx(51,'ambient_water_drip','sine',1600,180,0.25,(0.5,0.4,140,0.5),None,0,0.06,-4)
+_sfx(52,'ambient_pipe_creak','sine',300,150,0.4,(0.4,0.3,80,0.4),(10,12),0,0.1,-5)
+_sfx(53,'ambient_fan_spin','sine',180,190,2.5,(0.6,0.5,90,0.6),None,0.1,0.3,-7)
+_sfx(54,'ambient_distant_rumble','sine',55,40,2.0,(0.6,0.5,180,0.6),(8,10),0.1,0.3,-6)
+_sfx(55,'ambient_digital_whisper','sine',600,900,1.0,(0.5,0.4,45,0.5),None,0.05,0.15,-7)
+_sfx(56,'ambient_crackle','sine',1500,300,0.3,(0.3,0.2,25,0.3),(14,18),0,0.05,-4)
+_sfx(57,'ambient_magnetic_pulse','sine',250,500,0.6,(0.5,0.4,70,0.5),None,0.02,0.1,-5)
+_sfx(58,'ambient_cooling_system','sine',170,175,3.0,(0.7,0.6,110,0.7),None,0.2,0.4,-8)
+# 20 more ambient variants
+for i in range(20):
+    freq = 100 + i * 50
+    _sfx(59+i, f'ambient_drone_{i:02d}', 'sine', freq, freq+20, 2.0+i*0.1,
+         (0.6, 0.5, 100+i*10, 0.6), None, 0.1, 0.3, -7)
+
+# --- Combat variants (79-128) ---
+_sfx(79,'impact_light','sine',600,100,0.08,None,(16,20),0,0.02,-3)
+_sfx(80,'impact_heavy','sine',250,40,0.15,None,(22,28),0,0.04,-2)
+_sfx(81,'impact_critical','sine',400,60,0.2,(0.4,0.3,40,0.4),(18,22),0,0.05,-2)
+_sfx(82,'impact_shield','sine',900,400,0.12,(0.3,0.2,30,0.3),(10,12),0,0.03,-3)
+_sfx(83,'impact_armor_clank','sine',1200,300,0.1,(0.3,0.2,20,0.3),(20,25),0,0.03,-3)
+_sfx(84,'impact_parry','sine',1500,800,0.08,(0.4,0.3,25,0.4),(12,15),0,0.02,-3)
+_sfx(85,'impact_ricochet','sine',1800,600,0.15,(0.5,0.4,60,0.5),None,0,0.04,-3)
+_sfx(86,'impact_deflect','sine',1100,700,0.1,(0.4,0.3,35,0.4),(8,10),0,0.03,-3)
+_sfx(87,'impact_pierce','sine',2000,500,0.06,None,(14,18),0,0.015,-3)
+_sfx(88,'impact_slash','sine',1400,200,0.12,None,(10,14),0,0.03,-3)
+_sfx(89,'impact_crush','sine',180,30,0.2,None,(24,30),0,0.06,-2)
+_sfx(90,'impact_shock','sine',2500,800,0.1,(0.3,0.2,15,0.3),(16,20),0,0.02,-3)
+for i in range(20):
+    freq = 300 + i * 80
+    dur = 0.08 + (i % 5) * 0.04
+    _sfx(91+i, f'weapon_impact_{i:02d}', 'sine', freq, freq//3, dur,
+         None, (12+i%8, 15+i%8), 0, 0.02, -3)
+for i in range(18):
+    _sfx(111+i, f'projectile_hit_{i:02d}', 'sine', 500+i*60, 100+i*20, 0.1+i*0.01,
+         (0.3, 0.2, 20+i*3, 0.3), None, 0, 0.03, -4)
+
+# --- Movement sounds (129-168) ---
+_sfx(129,'footstep_metal','sine',800,200,0.05,None,(20,24),0,0.01,-6)
+_sfx(130,'footstep_tile','sine',1200,400,0.04,None,(16,20),0,0.01,-6)
+_sfx(131,'footstep_grate','sine',1500,500,0.05,None,(18,22),0,0.01,-5)
+_sfx(132,'footstep_dirt','sine',400,100,0.06,None,(8,10),0,0.015,-6)
+_sfx(133,'slide_long','sine',300,200,0.4,(0.4,0.3,50,0.4),None,0.02,0.08,-5)
+_sfx(134,'climb_grip','sine',500,700,0.1,None,(6,8),0,0.03,-5)
+_sfx(135,'teleport_out','sine',200,2000,0.3,(0.5,0.4,40,0.5),None,0,0.06,-3)
+_sfx(136,'teleport_in','sine',2000,200,0.3,(0.5,0.4,40,0.5),None,0,0.06,-3)
+_sfx(137,'hover_loop','sine',150,160,1.5,(0.6,0.5,80,0.6),None,0.1,0.2,-6)
+_sfx(138,'landing_light','sine',300,80,0.08,None,(10,12),0,0.02,-5)
+_sfx(139,'landing_heavy_2','sine',150,30,0.15,None,(16,20),0,0.04,-3)
+_sfx(140,'swim_stroke','sine',400,300,0.2,(0.4,0.3,60,0.4),None,0.02,0.05,-6)
+for i in range(28):
+    freq = 200 + i * 40
+    _sfx(141+i, f'movement_var_{i:02d}', 'sine', freq, freq//2, 0.1+i*0.02,
+         (0.3, 0.2, 30+i*2, 0.3) if i%3==0 else None,
+         (10+i%6, 12+i%6) if i%3==1 else None, 0, 0.03, -5)
+
+# --- UI / Feedback (169-218) ---
+_sfx(169,'ui_confirm','sine',660,880,0.12,(0.3,0.2,40,0.3),None,0,0.04,-5)
+_sfx(170,'ui_cancel','sine',440,330,0.1,None,None,0,0.03,-5)
+_sfx(171,'ui_scroll','sine',1000,1000,0.04,None,None,0,0.01,-7)
+_sfx(172,'ui_error','sine',220,180,0.15,None,(8,10),0,0.04,-4)
+_sfx(173,'ui_open_menu','sine',500,800,0.15,(0.3,0.2,30,0.3),None,0,0.04,-5)
+_sfx(174,'ui_close_menu','sine',800,400,0.12,None,None,0,0.03,-5)
+_sfx(175,'stat_up','sine',523,1047,0.25,(0.4,0.3,50,0.4),None,0.01,0.06,-4)
+_sfx(176,'stat_down','sine',523,262,0.25,None,None,0,0.06,-4)
+_sfx(177,'buff_apply','sine',660,990,0.3,(0.4,0.3,65,0.4),None,0.01,0.08,-4)
+_sfx(178,'debuff_apply','sine',440,220,0.3,(0.3,0.2,50,0.3),(6,8),0,0.08,-4)
+_sfx(179,'warning_beep','sine',880,880,0.1,None,None,0,0.03,-4)
+_sfx(180,'alarm_siren','sine',600,1200,0.5,(0.4,0.3,80,0.4),None,0.02,0.1,-4)
+_sfx(181,'codex_unlock','sine',784,1568,0.4,(0.5,0.4,70,0.5),None,0.01,0.1,-3)
+_sfx(182,'map_reveal','sine',440,660,0.35,(0.4,0.3,55,0.4),None,0.01,0.08,-4)
+_sfx(183,'quest_update','sine',523,784,0.3,(0.4,0.3,45,0.4),None,0.01,0.07,-4)
+_sfx(184,'quest_complete','sine',523,1047,0.5,(0.5,0.4,80,0.5),None,0.01,0.12,-3)
+for i in range(34):
+    freq = 400 + i * 30
+    _sfx(185+i, f'ui_tone_{i:02d}', 'sine', freq, freq + 100 + i*20, 0.1+i*0.01,
+         (0.3, 0.2, 30+i*2, 0.3) if i%2==0 else None, None, 0, 0.03, -5)
+
+# --- Boss attack sounds (219-248) ---
+bosses = ['microslop','gogol','amazomb','crapple','faceplant','daemon']
+for bi, boss in enumerate(bosses):
+    base_freq = 150 + bi * 40
+    _sfx(219+bi*5, f'boss_{boss}_atk1', 'sine', base_freq*2, base_freq//2, 0.3,
+         (0.5, 0.4, 80, 0.5), (14+bi*2, 18+bi*2), 0, 0.08, -3)
+    _sfx(220+bi*5, f'boss_{boss}_atk2', 'sine', base_freq*3, base_freq, 0.25,
+         (0.4, 0.3, 60, 0.4), (12+bi*2, 16+bi*2), 0, 0.06, -3)
+    _sfx(221+bi*5, f'boss_{boss}_atk3', 'sine', base_freq, base_freq*4, 0.35,
+         (0.5, 0.4, 100, 0.5), None, 0.01, 0.09, -2)
+    _sfx(222+bi*5, f'boss_{boss}_roar', 'sine', base_freq//2, base_freq*2, 0.5,
+         (0.6, 0.5, 120, 0.6), (10+bi*2, 14+bi*2), 0.02, 0.12, -3)
+    _sfx(223+bi*5, f'boss_{boss}_death', 'sine', base_freq*3, 30, 0.7,
+         (0.6, 0.5, 140, 0.6), (20+bi*2, 24+bi*2), 0, 0.15, -2)
+
+# --- Enemy type sounds (249-296) ---
+enemies = ['sentry','patrol','flyer','shield','spike','hunter',
+           'drone','turret','mimic','corruptor','ghost','bomber']
+for ei, ename in enumerate(enemies):
+    base = 300 + ei * 50
+    _sfx(249+ei*4, f'enemy_{ename}_alert', 'sine', base, base*2, 0.15,
+         (0.3, 0.2, 30, 0.3), None, 0, 0.04, -4)
+    _sfx(250+ei*4, f'enemy_{ename}_atk', 'sine', base*2, base//2, 0.12,
+         None, (10+ei, 14+ei), 0, 0.03, -3)
+    _sfx(251+ei*4, f'enemy_{ename}_hurt', 'sine', base+200, base-100, 0.1,
+         None, (12+ei, 16+ei), 0, 0.03, -4)
+    _sfx(252+ei*4, f'enemy_{ename}_spawn', 'sine', base//2, base*3, 0.2,
+         (0.4, 0.3, 40, 0.4), None, 0.01, 0.05, -4)
+
+# --- Ability sounds (297-320) ---
+abilities = ['overcharge','iron_skin','berserk','war_cry','plasma_burst',
+             'charged_beam','adrenaline','rage_mode','cloak','backstab',
+             'blink','smoke_bomb','poison_blade','trap_set','shadow_strike',
+             'vanish','data_shield','upload','firewall','drone_deploy',
+             'emp_blast','hack','nanobots','overclock']
+for ai, aname in enumerate(abilities):
+    base = 350 + ai * 30
+    _sfx(297+ai, f'ability_{aname}', 'sine', base, base + 200 + ai*20, 0.3 + ai*0.01,
+         (0.4, 0.3, 60+ai*3, 0.4), (8+ai%6, 12+ai%6) if ai%3==0 else None,
+         0.01, 0.08, -3)
+
+# --- Hazard sounds (321-340) ---
+hazards = ['acid_sizzle','fire_burst','electric_zap','ice_crack','corruption_pulse',
+           'laser_sweep','trap_trigger','gas_leak','plasma_field','gravity_well',
+           'radiation_tick','emp_wave','toxin_cloud','steam_vent','blade_spin',
+           'spike_extend','mine_arm','turret_lock','barrier_hum','field_collapse']
+for hi, hname in enumerate(hazards):
+    base = 400 + hi * 60
+    _sfx(321+hi, f'hazard_{hname}', 'sine', base, base//2 if hi%2==0 else base*2,
+         0.2 + hi*0.02, (0.4, 0.3, 50+hi*3, 0.4),
+         (10+hi%8, 14+hi%8) if hi%2==1 else None, 0, 0.05, -3)
+
+# --- Loot / Crafting sounds (341-360) ---
+loot_sfx = [('forge_hammer',300,100,0.2,(0.4,0.3,50,0.4),(18,22)),
+            ('salvage_crunch',600,150,0.15,None,(14,18)),
+            ('dismantle_snap',900,200,0.1,None,(10,14)),
+            ('enhance_shimmer',500,1000,0.4,(0.5,0.4,80,0.5),None),
+            ('rare_drop',784,1568,0.5,(0.5,0.4,90,0.5),None),
+            ('mythic_drop',392,1568,0.7,(0.6,0.5,120,0.6),None),
+            ('set_bonus',523,1047,0.6,(0.5,0.4,100,0.5),None),
+            ('common_drop',600,400,0.15,(0.3,0.2,30,0.3),None),
+            ('uncommon_drop',660,550,0.2,(0.3,0.2,40,0.3),None),
+            ('epic_drop',700,1200,0.45,(0.5,0.4,85,0.5),None),
+            ('equip_weapon',800,400,0.1,None,(8,10)),
+            ('equip_armor',500,200,0.12,None,(12,15)),
+            ('equip_accessory',1000,600,0.08,None,None),
+            ('unequip',400,600,0.08,None,None),
+            ('inventory_open',700,900,0.1,(0.3,0.2,25,0.3),None),
+            ('inventory_close',900,600,0.08,None,None),
+            ('credits_gain',880,1100,0.12,(0.3,0.2,35,0.3),None),
+            ('credits_spend',600,400,0.1,None,None),
+            ('shard_collect',1200,800,0.08,(0.3,0.2,20,0.3),None),
+            ('recipe_learn',660,1320,0.4,(0.5,0.4,70,0.5),None)]
+for li, (lname,fs,fe,dur,echo,od) in enumerate(loot_sfx):
+    EXPANDED_SFX.append((341+li, lname, 'sine', fs, fe, dur, echo, od, 0.01, 0.05, -3))
+
+# --- Story / Narrative (361-380) ---
+story_sfx = [('data_upload',300,1500,0.5),('decrypt_start',400,800,0.4),
+             ('decrypt_success',600,1200,0.35),('hack_attempt',500,900,0.3),
+             ('hack_success',700,1400,0.4),('connection_open',440,880,0.3),
+             ('connection_close',880,440,0.25),('transmission_send',350,700,0.35),
+             ('transmission_recv',700,350,0.3),('firewall_breach',250,1000,0.4),
+             ('system_boot',200,800,0.5),('system_shutdown',800,100,0.5),
+             ('alert_level_up',500,1000,0.3),('alert_level_down',1000,500,0.3),
+             ('virus_detected',900,300,0.2),('patch_applied',600,900,0.25),
+             ('memory_corrupt',1200,200,0.3),('memory_restore',200,1200,0.35),
+             ('trace_start',350,600,0.3),('trace_complete',600,1100,0.4)]
+for si, (sname,fs,fe,dur) in enumerate(story_sfx):
+    EXPANDED_SFX.append((361+si, sname, 'sine', fs, fe, dur,
+                         (0.5, 0.4, 70+si*3, 0.5), None, 0.01, 0.08, -4))
+
+
+def make_expanded_sfx():
+    """Generate all expanded SFX (39+)."""
+    d = SFX_DIR
+    for num, name, synth, fs, fe, dur, echo, od, fi, fo, gain in EXPANDED_SFX:
+        path = f'{d}/{num:02d}_{name}.wav'
+        args = ['synth', str(dur), synth, f'{fs}:{fe}']
+        if od:
+            args += ['overdrive', str(od[0]), str(od[1])]
+        if echo:
+            args += ['echo', str(echo[0]), str(echo[1]), str(echo[2]), str(echo[3])]
+        total_dur = dur + (echo[2]/1000 + dur * echo[3] if echo else 0) + fi + fo + 0.02
+        args += ['fade', 'h', str(fi), str(round(total_dur, 2)), str(fo)]
+        args += ['gain', str(gain)]
+        sox_wav(path, *args)
+
+
+# ── Expanded MOD tracks with larger waveforms ────────────────────────────────
+
+def wave_triangle(length=1024):
+    """1024-sample triangle wave, 8-bit signed."""
+    data = bytearray(length)
+    for i in range(length):
+        phase = (i * 4 * 256) // length
+        if phase < 256:
+            data[i] = phase & 0xFF
+        elif phase < 768:
+            data[i] = (512 - phase) & 0xFF
+        else:
+            data[i] = (phase - 1024) & 0xFF
+    return bytes(data)
+
+def wave_sawtooth(length=1024):
+    """1024-sample sawtooth wave, 8-bit signed."""
+    return bytes(((i * 256 // length) - 128) & 0xFF for i in range(length))
+
+def wave_square(length=1024, duty=50):
+    """1024-sample square wave with variable duty cycle."""
+    threshold = length * duty // 100
+    return bytes(100 if i < threshold else (256-100) for i in range(length))
+
+def wave_organ(length=1024):
+    """1024-sample organ (additive synthesis), 8-bit signed."""
+    data = bytearray(length)
+    for i in range(length):
+        val = 0
+        for h, amp in [(1, 80), (2, 40), (3, 20), (4, 10)]:
+            val += int(amp * math.sin(2 * math.pi * h * i / length))
+        data[i] = max(0, min(255, val + 128)) & 0xFF
+    return bytes(data)
+
+def wave_sine_large(length=1024):
+    """1024-sample sine wave."""
+    return bytes((int(118 * math.sin(2 * math.pi * i / length)) & 0xFF)
+                 for i in range(length))
+
+
+def smp_hdr_large(name, data, vol=56):
+    """Sample header for larger samples."""
+    words = len(data) // 2
+    return struct.pack('>22sHBBHH',
+                       name.encode()[:22].ljust(22, b'\0'),
+                       words, 0, vol, 0, words)
+
+
+def build_mod_large(title, patterns, order, speed=6, bpm=90,
+                    samples=None):
+    """Assemble a MOD with up to 4 large-sample instruments."""
+    if samples is None:
+        sd = wave_sine_large(1024)
+        samples = [('Melody', sd, 56), ('Bass', sd, 48)]
+
+    title_b = title.encode()[:20].ljust(20, b'\0')
+    hdrs = b''
+    for i in range(31):
+        if i < len(samples):
+            name, data, vol = samples[i]
+            hdrs += smp_hdr_large(name, data, vol)
+        else:
+            hdrs += struct.pack('>22sHBBHH', b'\0'*22, 0, 0, 0, 0, 0)
+
+    # Inject BPM+speed into first pattern
+    if patterns:
+        p0 = bytearray(patterns[0])
+        p0[0]=0; p0[1]=0; p0[2]=0x0F; p0[3]=bpm & 0xFF
+        p0[4]=0; p0[5]=0; p0[6]=0x0F; p0[7]=speed & 0x1F
+        patterns[0] = bytes(p0)
+
+    n_pat = max(order) + 1 if order else 1
+    mod = title_b + hdrs
+    mod += struct.pack('BB', len(order), 0)
+    mod += bytes(order + [0] * (128 - len(order)))
+    mod += b'M.K.'
+    for i in range(n_pat):
+        mod += patterns[i] if i < len(patterns) else bytes(MOD_ROWS * MOD_CHAN * 4)
+    # Append sample data
+    for i in range(len(samples)):
+        mod += samples[i][1]
+    return mod
+
+
+def gen_expanded_track(idx, title, key_notes, bass_notes, bpm, speed,
+                       n_patterns, wave_fns):
+    """Generate an expanded MOD track with multiple patterns and large samples."""
+    samps = []
+    for i, wfn in enumerate(wave_fns):
+        name = f'Inst{i+1}'
+        data = wfn(2048)  # 2048-byte samples
+        vol = 56 - i * 4
+        samps.append((name, data, vol))
+
+    pats = []
+    for pi in range(n_patterns):
+        cells = []
+        # Melody on channel 0
+        for r in range(4, 60, 4):
+            ni = (r // 4 + pi * 7) % len(key_notes)
+            n = key_notes[ni]
+            vol = 42 + (r % 16)
+            cells.append(note(r, 0, n, 1, vol))
+        # Bass on channel 1
+        for r in range(4, 60, 16):
+            ni = (r // 16 + pi * 3) % len(bass_notes)
+            n = bass_notes[ni]
+            cells.append(note(r, 1, n, 2, 40))
+        # Counter melody on channel 2 (if 3+ instruments)
+        if len(samps) >= 3:
+            for r in range(8, 60, 8):
+                ni = (r // 8 + pi * 5) % len(key_notes)
+                n = key_notes[(ni + 2) % len(key_notes)]
+                cells.append(note(r, 2, n, 3, 36))
+        pats.append(build_pattern(cells))
+
+    order = []
+    for _ in range(4):
+        order.extend(range(n_patterns))
+    order = order[:128]
+
+    return build_mod_large(title, pats, order, speed, bpm, samps)
+
+
+EXPANDED_TRACKS = {}
+
+# Ambient tracks
+EXPANDED_TRACKS['16_ambient_hub.mod'] = lambda: gen_expanded_track(
+    16, 'Ambient Hub', [C2,E2,G2,A2,C3,E3], [C1,G1,A1,E1], 65, 8, 4,
+    [wave_sine_large, wave_triangle, wave_organ])
+EXPANDED_TRACKS['17_ambient_shop.mod'] = lambda: gen_expanded_track(
+    17, 'Shop Theme', [D2,F2,A2,C3,D3,F3], [D1,A1,F1,C2], 72, 7, 4,
+    [wave_triangle, wave_sine_large, wave_organ])
+EXPANDED_TRACKS['18_ambient_codex.mod'] = lambda: gen_expanded_track(
+    18, 'Codex Browse', [E2,G2,B2,D3,E3,G3], [E1,B1,G1,D2], 60, 8, 3,
+    [wave_sine_large, wave_organ])
+EXPANDED_TRACKS['19_tension_01.mod'] = lambda: gen_expanded_track(
+    19, 'Tension I', [A2,C3,E3,G3,A3,C3], [A1,E2,C2,G1], 85, 6, 6,
+    [wave_sawtooth, wave_sine_large, wave_square, wave_organ])
+EXPANDED_TRACKS['20_tension_02.mod'] = lambda: gen_expanded_track(
+    20, 'Tension II', [D2,F2,Gs2,B2,D3,F3], [D1,Gs1,F1,B1], 90, 6, 6,
+    [wave_square, wave_sawtooth, wave_sine_large, wave_triangle])
+EXPANDED_TRACKS['21_tension_03.mod'] = lambda: gen_expanded_track(
+    21, 'Tension III', [F2,Gs2,B2,Cs3,F3,Gs3], [F1,B1,Gs1,Cs2], 95, 5, 8,
+    [wave_sawtooth, wave_square, wave_organ, wave_triangle])
+EXPANDED_TRACKS['22_tension_04.mod'] = lambda: gen_expanded_track(
+    22, 'Tension IV', [B2,D3,F3,Gs3,B3,D3], [B1,F2,D2,Gs1], 100, 5, 8,
+    [wave_square, wave_sawtooth, wave_triangle, wave_organ])
+EXPANDED_TRACKS['23_boss_phase2.mod'] = lambda: gen_expanded_track(
+    23, 'Boss Phase 2', [E3,Fs3,G3,A3,B3,Cs3], [E1,B1,A1,G1], 135, 4, 6,
+    [wave_sawtooth, wave_square, wave_sine_large, wave_organ])
+EXPANDED_TRACKS['24_boss_phase3.mod'] = lambda: gen_expanded_track(
+    24, 'Boss Phase 3', [A3,B3,C3,D3,E3,F3,G3,Gs3], [A1,E2,C2,D2], 145, 4, 8,
+    [wave_square, wave_sawtooth, wave_organ, wave_triangle])
+EXPANDED_TRACKS['25_cutscene_intro.mod'] = lambda: gen_expanded_track(
+    25, 'Cutscene Intro', [C2,Ds2,G2,As2,C3], [C1,G1,As1,Ds1], 70, 7, 4,
+    [wave_sine_large, wave_organ, wave_triangle])
+EXPANDED_TRACKS['26_cutscene_mid.mod'] = lambda: gen_expanded_track(
+    26, 'Cutscene Mid', [D2,F2,A2,C3,D3], [D1,A1,F1,C2], 78, 7, 4,
+    [wave_organ, wave_sine_large, wave_triangle])
+EXPANDED_TRACKS['27_cutscene_end.mod'] = lambda: gen_expanded_track(
+    27, 'Cutscene End', [G2,B2,D3,Fs3,G3], [G1,D2,B1,Fs1], 80, 7, 4,
+    [wave_triangle, wave_organ, wave_sine_large])
+EXPANDED_TRACKS['28_endgame_01.mod'] = lambda: gen_expanded_track(
+    28, 'Endgame I', [A2,C3,E3,G3,A3,B3], [A1,E2,C2,G1], 115, 5, 8,
+    [wave_sawtooth, wave_square, wave_sine_large, wave_organ])
+EXPANDED_TRACKS['29_endgame_02.mod'] = lambda: gen_expanded_track(
+    29, 'Endgame II', [D3,F3,A3,C3,D3,E3], [D1,A1,F1,C2], 120, 5, 8,
+    [wave_square, wave_sawtooth, wave_organ, wave_triangle])
+EXPANDED_TRACKS['30_bugbounty_01.mod'] = lambda: gen_expanded_track(
+    30, 'Bug Bounty I', [E2,G2,A2,B2,D3,E3], [E1,B1,A1,G1], 108, 5, 6,
+    [wave_sawtooth, wave_sine_large, wave_organ])
+EXPANDED_TRACKS['31_bugbounty_02.mod'] = lambda: gen_expanded_track(
+    31, 'Bug Bounty II', [Fs2,A2,B2,Cs3,E3,Fs3], [Fs1,Cs2,A1,E2], 112, 5, 6,
+    [wave_square, wave_triangle, wave_organ])
+EXPANDED_TRACKS['32_achieve_jingle.mod'] = lambda: gen_expanded_track(
+    32, 'Achievement', [C3,E3,G3,C3,E3,G3], [C1,G1], 100, 5, 2,
+    [wave_sine_large, wave_organ])
+EXPANDED_TRACKS['33_levelup_jingle.mod'] = lambda: gen_expanded_track(
+    33, 'Level Up', [E3,G3,B3,E3,G3,B3], [E1,B1], 105, 5, 2,
+    [wave_organ, wave_triangle])
+EXPANDED_TRACKS['34_raredrop_jingle.mod'] = lambda: gen_expanded_track(
+    34, 'Rare Drop', [A3,Cs3,E3,A3,Cs3,E3], [A1,E2], 95, 5, 2,
+    [wave_triangle, wave_sine_large])
+EXPANDED_TRACKS['35_crafting.mod'] = lambda: gen_expanded_track(
+    35, 'Crafting', [D2,F2,A2,C3,D3,F3], [D1,A1,F1,C2], 82, 6, 4,
+    [wave_organ, wave_triangle, wave_sine_large])
+EXPANDED_TRACKS['36_stealth_01.mod'] = lambda: gen_expanded_track(
+    36, 'Stealth I', [C2,Ds2,F2,Gs2,As2], [C1,Gs1,F1,Ds1], 68, 7, 4,
+    [wave_sine_large, wave_triangle])
+EXPANDED_TRACKS['37_stealth_02.mod'] = lambda: gen_expanded_track(
+    37, 'Stealth II', [D2,F2,Gs2,B2,D3], [D1,Gs1,F1,B1], 72, 7, 4,
+    [wave_triangle, wave_sine_large])
+EXPANDED_TRACKS['38_chase_01.mod'] = lambda: gen_expanded_track(
+    38, 'Chase I', [E3,G3,A3,B3,D3,E3], [E1,B1,A1,G1], 130, 4, 6,
+    [wave_sawtooth, wave_square, wave_sine_large, wave_organ])
+EXPANDED_TRACKS['39_chase_02.mod'] = lambda: gen_expanded_track(
+    39, 'Chase II', [A3,C3,D3,E3,G3,A3], [A1,E2,D2,C2], 138, 4, 6,
+    [wave_square, wave_sawtooth, wave_triangle, wave_organ])
+
+
 def main():
     os.makedirs(MUSIC_DIR, exist_ok=True)
     os.makedirs(SFX_DIR,   exist_ok=True)
 
-    print('Generating SFX via sox...')
+    print('Generating original SFX via sox...')
     make_sfx()
-    for f in sorted(os.listdir(SFX_DIR)):
-        if f.endswith('.wav'):
-            sz = os.path.getsize(os.path.join(SFX_DIR, f))
-            print(f'  SFX  {f} ({sz} bytes)')
+    print(f'  Generated 38 original SFX')
 
-    print('Generating MOD music...')
+    print('Generating expanded SFX via sox...')
+    make_expanded_sfx()
+    print(f'  Generated {len(EXPANDED_SFX)} expanded SFX')
+
+    total_sfx = len([f for f in os.listdir(SFX_DIR) if f.endswith('.wav')])
+    print(f'  Total SFX: {total_sfx}')
+
+    print('Generating original MOD music...')
     for fname, fn in sorted(MUSIC_TRACKS.items()):
         data = fn()
         path = os.path.join(MUSIC_DIR, fname)
@@ -590,7 +1003,16 @@ def main():
             fh.write(data)
         print(f'  MOD  {fname} ({len(data)} bytes)')
 
-    print(f'\n30 SFX + {len(MUSIC_TRACKS)} MOD tracks generated.')
+    print('Generating expanded MOD tracks...')
+    for fname, fn in sorted(EXPANDED_TRACKS.items()):
+        data = fn()
+        path = os.path.join(MUSIC_DIR, fname)
+        with open(path, 'wb') as fh:
+            fh.write(data)
+        print(f'  MOD  {fname} ({len(data)} bytes)')
+
+    total_mod = len([f for f in os.listdir(MUSIC_DIR) if f.endswith('.mod')])
+    print(f'\nTotal: {total_sfx} SFX + {total_mod} MOD tracks generated.')
 
 
 if __name__ == '__main__':

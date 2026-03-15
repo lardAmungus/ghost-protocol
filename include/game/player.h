@@ -67,7 +67,19 @@ typedef struct {
     u8  skill_points;     /* Unspent skill points */
     u8  evolution_pending; /* 1 if evolution choice available but not yet made */
     u16 craft_shards;     /* Crafting currency */
+    u8  jump_buffer;       /* Frames remaining in jump buffer window */
+    s32 last_safe_x;       /* Last safe ground position (8.8 FP) */
+    s32 last_safe_y;       /* Last safe ground position (8.8 FP) */
+    u8  armor_regen_timer; /* Frames until next regen tick */
+    u8  armor_flags;       /* Active armor passive bitflags */
 } PlayerState;
+
+#define AFLAG_HAZARD_RESIST  (1 << 0)
+#define AFLAG_HP_REGEN       (1 << 1)
+#define AFLAG_DAMAGE_RESIST  (1 << 2)
+#define AFLAG_DODGE_CHANCE   (1 << 3)
+#define AFLAG_REFLECT        (1 << 4)
+#define AFLAG_KB_RESIST      (1 << 5)
 
 extern PlayerState player_state;
 

@@ -19,6 +19,8 @@
 #include "states/state_net.h"
 #include "states/state_gameover.h"
 #include "states/state_win.h"
+#include "game/content_data.h"
+#include "game/content_extra.h"
 
 /* ---------- State machine ---------- */
 #include "states/state_ids.h"
@@ -133,6 +135,10 @@ int main(void) {
     if (mgba_ok) {
         mgba_printf(MGBA_LOG_INFO, "All subsystems ready");
     }
+
+    /* Force-link ROM content data to prevent LTO stripping */
+    content_force_link_all();
+    content_extra_force_link_all();
 
     /* Enter title state */
     state_switch(STATE_TITLE);

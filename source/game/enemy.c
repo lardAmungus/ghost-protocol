@@ -20,6 +20,7 @@
 #include "game/particle.h"
 #include "game/abilities.h"
 #include "game/quest.h"
+#include "game/loot.h"
 
 /* Enemy info table (base stats, scaled by tier at spawn) */
 const EnemyInfo enemy_info[ENEMY_TYPE_COUNT] = {
@@ -1400,6 +1401,12 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                     int crit_chance = 5 + player_state.lck / 2;
                     /* Skill tree: offense branch index 0 = crit chance (+3/6/9%) */
                     crit_chance += player_state.skill_tree[0] * 3;
+                    /* Crit Lens accessory bonus */
+                    {
+                        LootItem* crit_acc = inventory_get_equipped_accessory();
+                        if (crit_acc && LOOT_SUBTYPE(crit_acc->type) == ACC_CRIT_LENS)
+                            crit_chance += crit_acc->stat1;
+                    }
                     int is_crit = ((int)rand_range(100) < crit_chance);
                     int hit_dmg = p->damage;
                     if (is_crit) hit_dmg = hit_dmg * 2; /* Double damage on crit */
@@ -1547,6 +1554,12 @@ void enemy_damage(Entity* e, int dmg) {
                     1, 3, 2, 4, 2, 3,  /* Drone, Turret, Mimic, Corruptor, Ghost, Bomber */
                 };
                 int cr = base_credits[e->subtype] + enemy_ai[slot].tier;
+                /* Credit Finder accessory bonus */
+                {
+                    LootItem* cr_acc = inventory_get_equipped_accessory();
+                    if (cr_acc && LOOT_SUBTYPE(cr_acc->type) == ACC_CREDIT_FINDER)
+                        cr += cr_acc->stat1;
+                }
                 /* Skill tree: utility branch index 3 = credits bonus (+5/10/15%) */
                 int cr_bonus = player_state.skill_tree[11] * 5;
                 if (cr_bonus > 0) cr = cr * (100 + cr_bonus) / 100;

@@ -512,7 +512,14 @@ static void update_play(void) {
             if (collision_aabb(p, e)) {
                 s16 kb = (p->x > e->x) ? 128 : -128;
                 player_take_damage(enemy_get_atk(e), kb, -64);
-                /* SFX_PLAYER_HIT + shake handled inside player_take_damage */
+                /* Quantum Guard: reflect damage back to enemy on contact */
+                if (player_state.armor_flags & AFLAG_REFLECT) {
+                    LootItem* ref_armor = inventory_get_equipped_armor();
+                    if (ref_armor) {
+                        int ref_dmg = ref_armor->stat1 / 6;
+                        if (ref_dmg > 0) enemy_damage(e, ref_dmg);
+                    }
+                }
                 break;
             }
         }
@@ -524,7 +531,14 @@ static void update_play(void) {
         if (be && collision_aabb(p, be)) {
             s16 kb = (p->x > be->x) ? 128 : -128;
             player_take_damage(boss_state.atk, kb, -64);
-            /* SFX_PLAYER_HIT + shake handled inside player_take_damage */
+            /* Quantum Guard: reflect damage back to boss on contact */
+            if (player_state.armor_flags & AFLAG_REFLECT) {
+                LootItem* ref_armor = inventory_get_equipped_armor();
+                if (ref_armor) {
+                    int ref_dmg = ref_armor->stat1 / 6;
+                    if (ref_dmg > 0) boss_damage(ref_dmg);
+                }
+            }
         }
     }
 
@@ -569,13 +583,28 @@ static void update_play(void) {
         }
     }
 
+    /* Death plane: teleport player back if near world bottom */
+    if (p && player_is_alive()) {
+        int player_py = (int)(p->y >> 8);
+        if (player_py >= NET_MAP_PY - 16) {
+            player_take_damage(3, 0, -128);
+            p->x = player_state.last_safe_x;
+            p->y = player_state.last_safe_y;
+            p->vx = 0; p->vy = 0;
+            particle_burst(p->x + FP8(6), p->y + FP8(6), 4, PART_SPARK, 160, 12);
+            hud_notify("RESET!", 20);
+        }
+    }
+
     /* Hazard tile damage (spikes, beams, tesla) */
     if (hazard_cd > 0) hazard_cd--;
     if (p && player_is_alive() && hazard_cd == 0 && player_state.invincible_timer == 0) {
         int ppx = (int)(p->x >> 8) + (int)(p->width >> 1);
         int ppy = (int)(p->y >> 8) + (int)p->height - 2;
         if (collision_point_hazard(ppx, ppy)) {
-            player_take_damage(3, 0, -128);
+            int haz_dmg = 3;
+            if (player_state.armor_flags & AFLAG_HAZARD_RESIST) haz_dmg = 1;
+            player_take_damage(haz_dmg, 0, -128);
             hazard_cd = 30; /* Half second cooldown between hazard ticks */
             /* Hazard damage particles at player feet */
             particle_burst(p->x + FP8(6), p->y + FP8(12), 4, PART_SPARK, 160, 12);
