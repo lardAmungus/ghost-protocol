@@ -321,8 +321,8 @@ void projectile_update_all(void) {
         if (!(p->flags & PROJ_ENEMY)) {
             switch (p->type) {
             case SUBTYPE_PROJ_RAPID:
-                /* Slight deceleration — trails off at range */
-                p->vx = (s16)(p->vx * 95 / 100);
+                /* Very slight deceleration — trails off at extreme range */
+                p->vx = (s16)(p->vx * 99 / 100);
                 break;
             case SUBTYPE_PROJ_LASER:
                 /* Accelerates to max speed quickly */

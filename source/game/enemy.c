@@ -1425,14 +1425,19 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                     enemy_damage(e, hit_dmg);
                     {
                         int kb;
-                        switch (p->type) {
-                        case SUBTYPE_PROJ_CHARGE: kb = 192; break; /* Heavy */
-                        case SUBTYPE_PROJ_NOVA:   kb = 160; break;
-                        case SUBTYPE_PROJ_RAPID:  kb = 64;  break; /* Light */
-                        case SUBTYPE_PROJ_SPREAD: kb = 80;  break;
-                        default:                  kb = 128; break;
+                        if (e->subtype == ENEMY_TURRET) {
+                            kb = 32; /* Stationary — minimal knockback */
+                        } else {
+                            switch (p->type) {
+                            case SUBTYPE_PROJ_CHARGE: kb = 192; break;
+                            case SUBTYPE_PROJ_NOVA:   kb = 160; break;
+                            case SUBTYPE_PROJ_RAPID:  kb = 64;  break;
+                            case SUBTYPE_PROJ_SPREAD: kb = 80;  break;
+                            default:                  kb = 128; break;
+                            }
                         }
                         e->vx = (s16)((p->vx > 0) ? kb : -kb);
+                        if (e->subtype == ENEMY_TURRET) e->vy = 0;
                     }
                     total_dmg += hit_dmg;
                     /* Floating damage number */
