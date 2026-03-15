@@ -104,12 +104,9 @@ int shop_buy(int cursor) {
             player_state.hp = player_state.max_hp;
         break;
     case SHOP_SHIELD_CHARGE:
-        /* One-time +5 DEF (capped at 10 above base to prevent stacking) */
-        {
-            s16 base_def = player_state.def;
-            player_state.def += 5;
-            if (player_state.def > base_def + 10) player_state.def = (s16)(base_def + 10);
-        }
+        /* +5 DEF from computed base (recompute prevents stacking) */
+        player_recompute_stats();
+        player_state.def += 5;
         break;
     case SHOP_CD_RESET:
         /* Reset all ability cooldowns */

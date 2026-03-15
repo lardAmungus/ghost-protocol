@@ -1293,6 +1293,7 @@ IWRAM_CODE int boss_check_player_attack(Entity* player) {
 }
 
 void boss_damage(int dmg) {
+    if (boss_state.phase == BPHASE_DEAD) return;
     /* Damage resistance outside vulnerability window:
      * IDLE/ATTACK phases take 50% damage to reward hitting during vulnerability */
     int actual = dmg;

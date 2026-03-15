@@ -240,8 +240,10 @@ Projectile* projectile_spawn(s32 x, s32 y, s16 vx, s16 vy,
             if (spr) {
                 int pal = (flags & PROJ_ENEMY) ? PROJ_PAL_ENEMY : PROJ_PAL_PLAYER;
                 int base_ofs = 0;
-                if (type < (int)(sizeof(proj_type_tile_ofs) / sizeof(proj_type_tile_ofs[0]))) {
-                    base_ofs = proj_type_tile_ofs[type];
+                {
+                    int ti = type - SUBTYPE_PROJ_BUSTER;
+                    if (ti >= 0 && ti < (int)(sizeof(proj_type_tile_ofs) / sizeof(proj_type_tile_ofs[0])))
+                        base_ofs = proj_type_tile_ofs[ti];
                 }
                 spr->attr0 = ATTR0_SQUARE | ATTR0_4BPP;
                 spr->attr1 = ATTR1_SIZE_8;
@@ -455,8 +457,10 @@ void projectile_draw_all(s32 cam_x, s32 cam_y) {
 
             /* Update tile ID for animation frame */
             int base_ofs = 0;
-            if (p->type < (int)(sizeof(proj_type_tile_ofs) / sizeof(proj_type_tile_ofs[0]))) {
-                base_ofs = proj_type_tile_ofs[p->type];
+            {
+                int ti = p->type - SUBTYPE_PROJ_BUSTER;
+                if (ti >= 0 && ti < (int)(sizeof(proj_type_tile_ofs) / sizeof(proj_type_tile_ofs[0])))
+                    base_ofs = proj_type_tile_ofs[ti];
             }
             int pal = (p->flags & PROJ_ENEMY) ? PROJ_PAL_ENEMY : PROJ_PAL_PLAYER;
             spr->attr2 = (u16)(ATTR2_ID(PROJ_TILE_BASE + base_ofs + anim_frame) | ATTR2_PALBANK(pal));

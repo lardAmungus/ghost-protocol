@@ -719,6 +719,14 @@ static void update_play(void) {
                                     break;
                                 }
                             }
+                            /* Validate spawn not inside solid */
+                            if (level_data.collision[sty * NET_MAP_W + stx] == TILE_SOLID) {
+                                for (int up = sty - 1; up >= 4; up--) {
+                                    if (level_data.collision[up * NET_MAP_W + stx] != TILE_SOLID) {
+                                        sty = up; break;
+                                    }
+                                }
+                            }
                             /* Pick enemy type — use BB composition if active */
                             int roll = (int)rand_range(100);
                             int subtype;

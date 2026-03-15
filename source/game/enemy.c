@@ -1425,7 +1425,7 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                     enemy_damage(e, hit_dmg);
                     {
                         int kb;
-                        if (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY) {
+                        if (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY || e->subtype == ENEMY_SPIKE) {
                             kb = 32; /* Stationary — minimal knockback */
                         } else {
                             switch (p->type) {
@@ -1437,7 +1437,7 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                             }
                         }
                         e->vx = (s16)((p->vx > 0) ? kb : -kb);
-                        if (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY) e->vy = 0;
+                        if (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY || e->subtype == ENEMY_SPIKE) e->vy = 0;
                     }
                     total_dmg += hit_dmg;
                     /* Floating damage number */
@@ -1492,7 +1492,7 @@ void enemy_damage(Entity* e, int dmg) {
     }
     /* Push away from damage source — stationary enemies resist knockback */
     int kb;
-    int stationary = (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY);
+    int stationary = (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY || e->subtype == ENEMY_SPIKE);
     if (stationary) {
         kb = 32; /* Stationary enemies barely move */
     } else {

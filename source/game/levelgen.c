@@ -1339,7 +1339,7 @@ static void gen_gauntlet(int sect_x, int tier) {
         add_hazard(sect_x + 11, 27);
     }
     if (tier > 4) {
-        set_tile(sect_x + 3, 27, NTILE_HAZARD_TESLA, TILE_HAZARD);
+        set_tile(sect_x + 3, 27, NTILE_HAZARD_TESLA, TILE_TESLA);
     }
 
     /* Common decoration */
@@ -1499,6 +1499,8 @@ void levelgen_generate(u16 seed, int tier, int is_boss) {
      * After fill-below ran, columns below floors are all solid, so we scan
      * top-down to find the actual walking surface. */
     for (int s = 1; s < NUM_SECTIONS; s++) {
+        /* Skip boss section boundary — preserve arena walls */
+        if (level_data.sections[s] == SECT_BOSS) continue;
         int bx = s * 16;
 
         /* Find floor surface: topmost solid tile with empty above (walking level) */

@@ -182,8 +182,11 @@ static void unpack_save(const SaveData* sd) {
     for (int i = 0; i < sd->inventory_count && i < INVENTORY_SIZE; i++) {
         inventory_add(&sd->inventory[i]);
     }
-    if (sd->equipped_idx < INVENTORY_SIZE && sd->equipped_idx < sd->inventory_count) {
-        inventory_equip(sd->equipped_idx);
+    /* Re-equip ALL items that had LOOT_FLAG_EQUIPPED (weapon+armor+accessory) */
+    for (int i = 0; i < INVENTORY_SIZE; i++) {
+        LootItem* it = inventory_get(i);
+        if (it && (it->flags & LOOT_FLAG_EQUIPPED))
+            inventory_equip(i);
     }
     player_recompute_stats();
 
@@ -535,7 +538,6 @@ static void update_inventory(void) {
                 if (idx == cursor) {
                     inventory_equip(i);
                     player_recompute_stats();
-                    audio_play_sfx(SFX_PICKUP);
                     text_clear_all();
                     break;
                 }
@@ -1073,7 +1075,8 @@ static void update_craft(void) {
                 }
                 if (craft_sel_count == 3) {
                     if (craft_fuse(craft_sel[0], craft_sel[1], craft_sel[2])) {
-                        /* Success — reset */
+                        /* Success — reset and recompute stats (consumed items may have been equipped) */
+                        player_recompute_stats();
                         craft_sel_count = 0;
                         cursor = 0;
                         inv_scroll = 0;
@@ -2230,7 +2233,7 @@ static void draw_bb_results(void) {
 
     /* Check if this is the new high score (complete() already stored it) */
     u16 hs = bugbounty_get_high_score(bb_state.tier);
-    if (bb_state.score > hs && bb_state.score > 0) {
+    if (bb_state.score >= hs && bb_state.score > 0) {
         text_print(4, 9, "** NEW HIGH SCORE! **");
     } else {
         text_print(4, 9, "Best:");

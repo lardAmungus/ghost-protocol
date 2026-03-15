@@ -140,6 +140,9 @@ int main(void) {
     content_force_link_all();
     content_extra_force_link_all();
 
+    /* Seed RNG from hardware timers (started above) */
+    rng_seed();
+
     /* Enter title state */
     state_switch(STATE_TITLE);
 
