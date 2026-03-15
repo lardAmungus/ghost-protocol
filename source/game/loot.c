@@ -376,9 +376,9 @@ int craft_fuse(int idx1, int idx2, int idx3) {
     inventory_remove(idx2);
     inventory_remove(idx3);
     inv_items[idx1] = result;
-    /* Only preserve equipped flag if result is same category */
+    /* Re-equip via proper API (unequips same-category items first) */
     if (was_equipped && LOOT_CATEGORY(result.type) == old_cat)
-        inv_items[idx1].flags |= LOOT_FLAG_EQUIPPED;
+        inventory_equip(idx1);
 
     audio_play_sfx(SFX_CRAFT_SUCCESS);
     hud_notify("FUSED!", 60);

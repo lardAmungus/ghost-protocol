@@ -558,9 +558,10 @@ static void update_inventory(void) {
                     int value = shop_sell(i);
                     if (value > 0) {
                         audio_play_sfx(SFX_PICKUP);
-                        /* Adjust cursor if at end */
+                        /* Adjust cursor and scroll if at end */
                         int new_count = inventory_count();
                         if (cursor >= new_count && new_count > 0) cursor = new_count - 1;
+                        if (cursor < inv_scroll) inv_scroll = cursor;
                     }
                     text_clear_all();
                     break;
@@ -799,6 +800,7 @@ static void draw_story(void) {
 
     /* Choice screen */
     if (choice_active && active_dialogue->choice_a) {
+        text_clear_rect(2, 5, 28, 11); /* Clear dialogue area before choices */
         terminal_print_pal(2, 3, "== CHOOSE YOUR PATH ==", TPAL_AMBER);
         /* Option A */
         text_put_char(4, 8, choice_cursor == 0 ? '>' : ' ');
@@ -840,10 +842,10 @@ static void draw_story(void) {
 
     /* Page indicator */
     text_print(3, 18, "A:Next");
-    text_print(18, 18, "Page");
-    text_print_int(23, 18, story_page + 1);
-    text_put_char(25, 18, '/');
-    text_print_int(26, 18, active_dialogue->num_pages);
+    text_print(17, 18, "Page");
+    text_print_int(22, 18, story_page + 1);
+    text_put_char(24, 18, '/');
+    text_print_int(25, 18, active_dialogue->num_pages);
 }
 
 static void update_bb_results(void) {
@@ -976,9 +978,12 @@ static void draw_skills(void) {
         /* Bonus preview */
         int bonus = rank * 5; /* Each rank = +5% */
         if (bonus > 0) {
-            text_print(25, row, "+");
-            text_print_int(26, row, bonus);
-            text_print(28, row, "%");
+            text_print(22, row, "+");
+            text_print_int(23, row, bonus);
+            {
+                int bw = (bonus >= 100) ? 3 : (bonus >= 10) ? 2 : 1;
+                text_put_char(23 + bw, row, '%');
+            }
         }
     }
 
@@ -1018,6 +1023,7 @@ static void update_craft(void) {
             craft_mode = 0;
             craft_sel_count = 0;
             cursor = 0;
+            inv_scroll = 0;
             text_clear_all();
             audio_play_sfx(SFX_MENU_BACK);
         } else {
