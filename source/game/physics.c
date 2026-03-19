@@ -9,7 +9,7 @@
 
 /* ---- Per-class physics tuning ---- */
 const PhysicsParams physics_class[CLASS_COUNT] = {
-    [CLASS_ASSAULT] = {
+    [CLASS_TROJAN] = {
         .gravity         = 38,       /* ~0.15 px/f^2 */
         .max_fall        = 1024,     /* 4.0 px/f */
         .jump_vel        = -960,     /* -3.75 px/f (strong) */
@@ -24,7 +24,7 @@ const PhysicsParams physics_class[CLASS_COUNT] = {
         .dash_speed      = 0,
         .dash_frames     = 0,
         .dash_cooldown   = 0,
-        .max_jumps       = 1,
+        .max_jumps       = 2,        /* double jump (universal) */
         .can_wall_jump   = 1,
         .can_dash        = 0,
     },
@@ -62,7 +62,7 @@ const PhysicsParams physics_class[CLASS_COUNT] = {
         .dash_speed      = 0,
         .dash_frames     = 0,
         .dash_cooldown   = 0,
-        .max_jumps       = 1,
+        .max_jumps       = 2,        /* double jump (universal) */
         .can_wall_jump   = 1,
         .can_dash        = 0,
     },

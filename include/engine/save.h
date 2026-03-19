@@ -16,16 +16,17 @@ typedef struct {
     u32 magic;              /* Validates save exists (4) */
     u16 checksum;           /* CRC-16 of remaining fields (2) */
     /* Player core */
-    u8  player_class;       /* CLASS_ASSAULT/INFILTRATOR/TECHNOMANCER (1) */
-    u8  player_level;       /* 1-20 (1) */
+    u8  player_class;       /* CLASS_TROJAN/INFILTRATOR/TECHNOMANCER (1) */
+    u8  _pad0;              /* Alignment padding (1) */
+    u16 player_level;       /* 1-40 (2) */
     s16 player_hp;          /* Current HP (2) */
     s16 player_max_hp;      /* Max HP (2) */
-    u16 player_xp;          /* Current XP (2) */
+    u32 player_xp;          /* Current XP (4) */
     s16 player_atk;         /* (2) */
     s16 player_def;         /* (2) */
     s16 player_spd;         /* (2) */
     s16 player_lck;         /* (2) */
-    u16 credits;            /* Currency (2) */
+    u32 credits;            /* Currency (4) */
     u8  ability_unlocks;    /* Bitmask (1) */
     /* Quest progress */
     u8  quest_act;          /* Story act 0-5 (1) */
@@ -45,7 +46,7 @@ typedef struct {
     u8  bb_total_runs;      /* Total completed runs (1) */
     /* Skill tree & evolution (Phase 1) */
     u8  skill_tree[12];     /* Skill ranks (12 skills x rank 0-3) (12) */
-    u8  evolution;          /* EVOLUTION_* (1) */
+    u8  evolution;          /* legacy evolution value, 0=none (1) */
     u8  skill_points;       /* Unspent skill points (1) */
     /* Crafting (Phase 2) */
     u16 craft_shards;       /* Crafting currency (2) */
@@ -70,10 +71,13 @@ typedef struct {
     u8  bb_threat_level;    /* Permanent difficulty scaling (1) */
     u8  bb_highest_level;   /* Highest player level reached (1) */
     u8  endgame_unlocked;   /* 1=endless mode available (1) */
+    u8  last_used_ability;  /* Assigned ability for R button (1) */
+    u8  armor_flags;        /* Active armor passive bitflags (1) */
+    u8  evolution_pending;  /* 1 if evolution choice available (1) */
     /* Reserved for future use — size accounts for compiler alignment padding:
      * +1 byte before bb_high_scores (u16 at odd offset needs 2-byte align)
      * +3 bytes before play_time_frames (u32 needs 4-byte align after u8[3]) */
-    u8  reserved[210];      /* Pad to 512 total (including implicit padding) */
+    u8  reserved[201];      /* Pad to 512 total (including implicit padding) */
 } SaveData;                 /* 512 bytes */
 
 _Static_assert(sizeof(SaveData) == SAVE_SLOT_SIZE,

@@ -19,13 +19,14 @@
 #include "engine/entity.h"
 #include "engine/rng.h"
 #include <string.h>
+#include <stddef.h>
 
 PlayerState player_state;
 GameStats game_stats;
 static Entity* p_ent = NULL;
-static int selected_ability = 0; /* Currently selected ability slot (0-7) */
 #define COYOTE_FRAMES 6
-static int coyote_timer = 0;     /* Frames since leaving ground */
+static u8 r_hold_frames = 0;    /* Frames R button held (for ability wheel) */
+static u8 wheel_suppress = 0;  /* Suppress re-open until R released */
 
 /* ---- Player sprite data (16x16, 4 tiles per frame) ---- */
 /* 6 frames: idle0, idle1, run0, run1, jump, shoot */
@@ -98,7 +99,7 @@ static const u32 player_tiles[48][8] = {
  * 5-7=glow ramp (dim→bright→core), 8-A=skin ramp,
  * B-C=circuit accent pair, D-E=AA edge colors, F=pure white */
 static const u16 class_palettes[CLASS_COUNT][16] = {
-    [CLASS_ASSAULT] = {
+    [CLASS_TROJAN] = {
         /* Heavy combat spec: blue-steel armor, blazing red visor, teal circuits */
         0x0000,                /* 0: transparent */
         RGB15_C(1,2,6),        /* 1: deep navy outline */
@@ -168,13 +169,13 @@ static const u16 class_palettes[CLASS_COUNT][16] = {
 /* Stats at level 1 */
 static const s16 base_stats[CLASS_COUNT][5] = {
     /* HP, ATK, DEF, SPD, LCK */
-    [CLASS_ASSAULT]      = { 40, 10, 6, 4, 2 },
+    [CLASS_TROJAN]      = { 40, 10, 6, 4, 2 },
     [CLASS_INFILTRATOR]  = { 30,  7, 4, 8, 5 },
     [CLASS_TECHNOMANCER] = { 35,  8, 7, 5, 3 },
 };
 /* Per-level gains */
 static const s16 level_gains[CLASS_COUNT][5] = {
-    [CLASS_ASSAULT]      = { 3, 2, 1, 1, 0 },
+    [CLASS_TROJAN]      = { 3, 2, 1, 1, 0 },
     [CLASS_INFILTRATOR]  = { 2, 1, 1, 2, 1 },
     [CLASS_TECHNOMANCER] = { 2, 1, 2, 1, 1 },
 };
@@ -192,25 +193,26 @@ void player_get_base_stats(int cls, int lvl, s16* hp, s16* atk, s16* def, s16* s
 }
 
 static void apply_evolution_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
+    /* Legacy evolution bonuses (replaced by tier system in future tasks) */
     switch (player_state.evolution) {
-    case EVOLUTION_VANGUARD:  /* HP+30%, DEF+20% */
+    case 1:  /* Vanguard: HP+30%, DEF+20% */
         *hp  = (s16)(*hp * 130 / 100);
         *def = (s16)(*def * 120 / 100);
         break;
-    case EVOLUTION_COMMANDO:  /* ATK+25% */
+    case 2:  /* Commando: ATK+25% */
         *atk = (s16)(*atk * 125 / 100);
         break;
-    case EVOLUTION_PHANTOM:   /* SPD+15% */
+    case 3:  /* Phantom: SPD+15% */
         *spd = (s16)(*spd * 115 / 100);
         break;
-    case EVOLUTION_STRIKER:   /* SPD+30% */
+    case 4:  /* Striker: SPD+30% */
         *spd = (s16)(*spd * 130 / 100);
         break;
-    case EVOLUTION_ARCHITECT: /* HP+15%, DEF+15% */
+    case 5:  /* Architect: HP+15%, DEF+15% */
         *hp  = (s16)(*hp * 115 / 100);
         *def = (s16)(*def * 115 / 100);
         break;
-    case EVOLUTION_HACKER:    /* ATK+20% */
+    case 6:  /* Hacker: ATK+20% */
         *atk = (s16)(*atk * 120 / 100);
         break;
     default: break;
@@ -347,29 +349,32 @@ static void check_ability_unlocks(void) {
     if (lv >= AB_UNLOCK_8) mask |= ABILITY_8;
     player_state.ability_unlocks = mask;
 
-    /* Check if evolution is available */
-    if (lv >= EVOLUTION_LEVEL && player_state.evolution == EVOLUTION_NONE) {
+    /* Check if evolution is available (legacy, level 20) */
+    if (lv >= 20 && player_state.evolution == 0) {
         player_state.evolution_pending = 1;
     }
 }
 
+/* player_init: Full initialization for a NEW character.
+ * Zeroes the entire PlayerState (both persistent and level-scope fields).
+ * INTEGRATION NOTE: Only call this for character creation. For level re-entry,
+ * call player_init_level() instead to preserve persistent fields. */
 void player_init(int player_class) {
     /* Bounds check */
-    if (player_class < 0 || player_class >= CLASS_COUNT) player_class = CLASS_ASSAULT;
+    if (player_class < 0 || player_class >= CLASS_COUNT) player_class = 0; /* default CLASS_TROJAN */
 
     /* Spawn entity */
     entity_init();
     p_ent = entity_spawn(ENT_PLAYER);
     if (!p_ent) return;
 
-    /* Clear state */
+    /* Clear ALL state (new character) */
     memset(&player_state, 0, sizeof(player_state));
     player_state.player_class = (u8)player_class;
     player_state.level = 1;
     player_state.state = PSTATE_IDLE;
     player_state.credits = 100;
-    selected_ability = 0;
-    coyote_timer = 0;
+    r_hold_frames = 0;
 
     /* Compute stats */
     compute_stats();
@@ -389,6 +394,9 @@ void player_init(int player_class) {
     player_state.last_safe_x = p_ent->x;
     player_state.last_safe_y = p_ent->y;
 
+    /* Set initial jumps from class physics */
+    player_state.jumps_remaining = physics_class[player_class].max_jumps;
+
     /* Allocate OAM sprite (16x16) */
     int oam = sprite_alloc();
     if (oam >= 0) {
@@ -407,6 +415,51 @@ void player_init(int player_class) {
 
     /* Init projectile pool */
     projectile_init();
+}
+
+/* player_init_level: Zero only level-scope fields for level re-entry.
+ * Preserves all persistent fields (class, level, XP, stats, inventory, etc.). */
+void player_init_level(void) {
+    size_t offset = offsetof(PlayerState, _level_scope_start);
+    memset((u8*)&player_state + offset, 0, sizeof(PlayerState) - offset);
+    player_state.hp = player_state.max_hp;
+    player_state.jumps_remaining = physics_class[player_state.player_class].max_jumps;
+    r_hold_frames = 0;
+    ability_reset();
+}
+
+/* player_enter_level: Full level entry — creates entity, allocates sprite,
+ * loads graphics, and resets level-scope fields. Call from state_net_enter().
+ * Preserves all persistent fields (unlike player_init which is for new characters). */
+void player_enter_level(void) {
+    /* Reset level-scope fields first */
+    player_init_level();
+
+    /* Create player entity in the entity pool */
+    p_ent = entity_spawn(ENT_PLAYER);
+    if (!p_ent) return;
+
+    /* Setup entity hitbox */
+    p_ent->width = PLAYER_HITBOX_W;
+    p_ent->height = PLAYER_HITBOX_H;
+    p_ent->facing = FACING_RIGHT;
+
+    /* Allocate OAM sprite (16x16) */
+    int oam = sprite_alloc();
+    if (oam >= 0) {
+        p_ent->oam_index = (u8)oam;
+        OBJ_ATTR* spr = sprite_get(oam);
+        if (spr) {
+            spr->attr0 = ATTR0_SQUARE | ATTR0_4BPP;
+            spr->attr1 = ATTR1_SIZE_16;
+            spr->attr2 = (u16)(ATTR2_ID(PLAYER_TILE_BASE) | ATTR2_PALBANK(PLAYER_PAL_BANK));
+        }
+    }
+
+    /* Load player graphics into VRAM */
+    memcpy16(&tile_mem_obj[0][PLAYER_TILE_BASE], player_tiles, sizeof(player_tiles) / 2);
+    memcpy16(&pal_obj_mem[PLAYER_PAL_BANK * 16],
+             class_palettes[player_state.player_class], 16);
 }
 
 Entity* player_get(void) {
@@ -505,7 +558,7 @@ static void do_shoot(void) {
     }
 
     switch (cls) {
-    case CLASS_ASSAULT:
+    case CLASS_TROJAN:
     {
         int cd = weapon ? base_cooldown : 12;
         if (wtype == WEAPON_SPREAD && weapon) {
@@ -554,19 +607,27 @@ static void do_shoot(void) {
     case CLASS_INFILTRATOR:
     {
         int cd = weapon ? GP_MAX(base_cooldown - 3, 4) : 6;
+        /* Skill tree[3] (Pierce): chance to add PROJ_PIERCE to shots
+         * Rank 1: 20%, Rank 2: 40%, Rank 3: 65% */
+        u8 pierce_flags = 0;
+        if (player_state.skill_tree[3] > 0) {
+            int pierce_chance = player_state.skill_tree[3] * 15 + player_state.skill_tree[3] * 5;
+            if ((int)rand_range(100) < pierce_chance)
+                pierce_flags = PROJ_PIERCE;
+        }
         if (wtype == WEAPON_RAPID && weapon) {
             /* Extra fast with bonus speed */
             projectile_spawn(spawn_x, spawn_y, (s16)(dir_x * 3 / 2), 0,
-                             (s16)(dmg * 2 / 3), SUBTYPE_PROJ_RAPID, 0, 0);
+                             (s16)(dmg * 2 / 3), SUBTYPE_PROJ_RAPID, pierce_flags, 0);
             cd = GP_MAX(cd - 2, 3);
         } else if (wtype == WEAPON_SPREAD && weapon) {
             s16 sdmg = (s16)(dmg / 2);
-            projectile_spawn(spawn_x, spawn_y, (s16)(dir_x + dir_x / 4), -64, sdmg, SUBTYPE_PROJ_RAPID, 0, 0);
-            projectile_spawn(spawn_x, spawn_y, (s16)(dir_x + dir_x / 4), 64, sdmg, SUBTYPE_PROJ_RAPID, 0, 0);
+            projectile_spawn(spawn_x, spawn_y, (s16)(dir_x + dir_x / 4), -64, sdmg, SUBTYPE_PROJ_RAPID, pierce_flags, 0);
+            projectile_spawn(spawn_x, spawn_y, (s16)(dir_x + dir_x / 4), 64, sdmg, SUBTYPE_PROJ_RAPID, pierce_flags, 0);
             cd += 2;
         } else {
             projectile_spawn(spawn_x, spawn_y, (s16)(dir_x + dir_x / 4), 0,
-                             (s16)(dmg * 2 / 3), SUBTYPE_PROJ_RAPID, 0, 0);
+                             (s16)(dmg * 2 / 3), SUBTYPE_PROJ_RAPID, pierce_flags, 0);
         }
         player_state.shoot_cooldown = (u8)cd;
         break;
@@ -616,11 +677,22 @@ static void do_shoot(void) {
 
     /* No screen flash on regular weapon fire — too noisy */
 
-    /* Recoil — nudge player opposite to shot direction for 1 frame */
-    if (p_ent->facing == FACING_LEFT)
-        p_ent->x += FP8(1);
-    else
-        p_ent->x -= FP8(1);
+    /* Recoil — nudge player opposite to shot direction, with collision check */
+    {
+        s32 old_x = p_ent->x;
+        if (p_ent->facing == FACING_LEFT)
+            p_ent->x += FP8(1);
+        else
+            p_ent->x -= FP8(1);
+        /* Undo recoil if it pushed us into a solid tile */
+        int check_x = (int)(p_ent->x >> 8) + (p_ent->facing == FACING_LEFT ? (int)p_ent->width : 0);
+        int check_y_top = (int)(p_ent->y >> 8) + 2;
+        int check_y_bot = (int)(p_ent->y >> 8) + (int)p_ent->height - 2;
+        if (collision_point_solid(check_x, check_y_top) ||
+            collision_point_solid(check_x, check_y_bot)) {
+            p_ent->x = old_x;
+        }
+    }
 
     /* Overclock: halve cooldown when active (Assault ability) */
     if (ability_is_overclock_active()) {
@@ -637,11 +709,19 @@ void player_update(void) {
     int cls = player_state.player_class;
     const PhysicsParams* phys = &physics_class[cls];
 
+    /* Effective move speed: skill tree index 8 (SPD) boosts movement */
+    int effective_speed = phys->move_speed;
+    if (player_state.skill_tree[8] > 0) {
+        effective_speed = effective_speed + (effective_speed * player_state.skill_tree[8] * 5 / 100);
+    }
+
     /* Tick timers */
     if (player_state.shoot_cooldown > 0) player_state.shoot_cooldown--;
     if (player_state.invincible_timer > 0) player_state.invincible_timer--;
     if (player_state.dash_timer > 0) player_state.dash_timer--;
     if (player_state.dash_cooldown > 0) player_state.dash_cooldown--;
+    if (player_state.charge_rush_cooldown > 0) player_state.charge_rush_cooldown--;
+    if (player_state.tether_cooldown > 0) player_state.tether_cooldown--;
 
     /* Hit stun */
     if (player_state.state == PSTATE_HIT) {
@@ -655,7 +735,7 @@ void player_update(void) {
         return;
     }
 
-    /* Dash state */
+    /* Dash state (Infiltrator) */
     if (player_state.state == PSTATE_DASH) {
         if (player_state.dash_timer == 0) {
             player_state.state = p_ent->on_ground ? PSTATE_IDLE : PSTATE_FALL;
@@ -667,6 +747,153 @@ void player_update(void) {
             particle_spawn(trail_x, p_ent->y + FP8(4), trail_vx, -32, PART_SPARK, 10);
         }
         physics_update(p_ent, phys);
+        return;
+    }
+
+    /* Charge Rush state (Assault) */
+    if (player_state.state == PSTATE_CHARGE) {
+        if (player_state.charge_rush_timer > 0) {
+            player_state.charge_rush_timer--;
+            /* Maintain charge velocity, skip gravity */
+            p_ent->vx = player_state.charge_vx;
+            p_ent->vy = player_state.charge_vy;
+            /* Trail particles every 2 frames */
+            if ((player_state.charge_rush_timer & 1) == 0) {
+                s32 trail_x = p_ent->x + (p_ent->facing ? FP8(12) : -FP8(4));
+                particle_spawn(trail_x, p_ent->y + FP8(4),
+                               p_ent->facing ? (s16)80 : (s16)-80, -32, PART_SPARK, 10);
+            }
+            physics_update(p_ent, phys);
+            /* Wall contact during horizontal/upward charge: enter wall slide */
+            if (p_ent->on_wall && player_state.charge_vy <= 0) {
+                player_state.charge_rush_timer = 0;
+                player_state.state = PSTATE_WALL_SLIDE;
+                p_ent->vx = 0;
+                return;
+            }
+            /* Ground contact during downward slam */
+            if (p_ent->on_ground && player_state.charge_vy > 0) {
+                player_state.charge_rush_timer = 0;
+                player_state.state = PSTATE_IDLE;
+                video_shake(3, 1);
+                particle_burst(p_ent->x + FP8(6), p_ent->y + FP8(12), 4, PART_BURST, 160, 12);
+                return;
+            }
+            /* INTEGRATION NOTE: enemy.c should check player_state.state == PSTATE_CHARGE
+             * and call player_charge_rush_damage() for contact damage. */
+            return;
+        } else {
+            /* Charge expired: return to normal movement */
+            player_state.state = p_ent->on_ground ? PSTATE_IDLE : PSTATE_FALL;
+        }
+    }
+
+    /* Tether pull state (Technomancer) */
+    if (player_state.state == PSTATE_TETHER) {
+        if (player_state.tether_timer > 0) {
+            player_state.tether_timer--;
+            /* Move toward target at fixed speed */
+            s32 dx = player_state.tether_target_x - p_ent->x;
+            s32 dy = player_state.tether_target_y - p_ent->y;
+            /* Check arrival (distance < 512 in 8.8 FP = ~2 pixels) */
+            s32 dist_sq = (dx >> 4) * (dx >> 4) + (dy >> 4) * (dy >> 4);
+            if (dist_sq < (512 >> 4) * (512 >> 4) || player_state.tether_timer == 0) {
+                /* Snap to target, but verify target isn't inside solid geometry */
+                s32 snap_x = player_state.tether_target_x;
+                s32 snap_y = player_state.tether_target_y;
+                int sx = (int)(snap_x >> 8);
+                int sy = (int)(snap_y >> 8);
+                if (collision_point_solid(sx + 1, sy + 2) ||
+                    collision_point_solid(sx + (int)p_ent->width - 1, sy + (int)p_ent->height - 1)) {
+                    /* Target is inside solid — stay at current position */
+                    snap_x = p_ent->x;
+                    snap_y = p_ent->y;
+                }
+                p_ent->x = snap_x;
+                p_ent->y = snap_y;
+                p_ent->vx = 0;
+                p_ent->vy = 0;
+                /* If target was horizontal (scan_dy was 0), check for wall hold */
+                /* Determine if we hit a wall by checking wall adjacency */
+                if (p_ent->on_wall || physics_check_wall(p_ent, p_ent->facing ? -1 : 1)) {
+                    /* Enter tether hold: stick to wall */
+                    player_state.state = PSTATE_TETHER_HOLD;
+                    player_state.tether_hold = 1;
+                    player_state.tether_hold_timer = 90;
+                    p_ent->on_wall = 1;
+                } else {
+                    player_state.state = p_ent->on_ground ? PSTATE_IDLE : PSTATE_FALL;
+                    player_state.tether_cooldown = 30;
+                }
+                player_state.tether_timer = 0;
+            } else {
+                /* Normalize direction and move at speed 512/frame */
+                /* Approximate: use dominant axis for speed distribution */
+                s32 adx = dx < 0 ? -dx : dx;
+                s32 ady = dy < 0 ? -dy : dy;
+                s32 total = adx + ady;
+                if (total > 0) {
+                    p_ent->vx = (s16)(dx * 512 / total);
+                    p_ent->vy = (s16)(dy * 512 / total);
+                }
+            }
+            /* Apply velocity with collision checking (no gravity during tether) */
+            {
+                s32 old_x = p_ent->x;
+                s32 old_y = p_ent->y;
+                p_ent->x += p_ent->vx;
+                p_ent->y += p_ent->vy;
+                /* Collision check — if we entered a solid tile, revert that axis */
+                int cx = (int)(p_ent->x >> 8);
+                int cy = (int)(p_ent->y >> 8);
+                int w = (int)p_ent->width;
+                int h = (int)p_ent->height;
+                if (collision_point_solid(cx + 1, cy + 2) || collision_point_solid(cx + w - 1, cy + 2) ||
+                    collision_point_solid(cx + 1, cy + h - 1) || collision_point_solid(cx + w - 1, cy + h - 1)) {
+                    /* Hit solid — snap to pre-collision position and end tether */
+                    p_ent->x = old_x;
+                    p_ent->y = old_y;
+                    p_ent->vx = 0;
+                    p_ent->vy = 0;
+                    player_state.tether_timer = 0;
+                    player_state.state = p_ent->on_ground ? PSTATE_IDLE : PSTATE_FALL;
+                }
+                /* World bounds clamping (all edges) */
+                if (p_ent->x < 0) { p_ent->x = 0; p_ent->vx = 0; }
+                if (p_ent->y < 0) { p_ent->y = 0; p_ent->vy = 0; }
+                s32 max_x = (s32)(NET_MAP_PX - w) << 8;
+                s32 max_y = (s32)(NET_MAP_PY - h) << 8;
+                if (p_ent->x > max_x) { p_ent->x = max_x; p_ent->vx = 0; }
+                if (p_ent->y > max_y) { p_ent->y = max_y; p_ent->vy = 0; }
+            }
+            return;
+        }
+    }
+
+    /* Tether hold state (Technomancer wall grip) */
+    if (player_state.state == PSTATE_TETHER_HOLD) {
+        if (player_state.tether_hold_timer > 0) {
+            player_state.tether_hold_timer--;
+            p_ent->vx = 0;
+            p_ent->vy = 0;
+            p_ent->on_wall = 1;
+            /* A pressed during tether hold: wall jump + reset tether cooldown (chain tether) */
+            if (input_hit(KEY_A)) {
+                p_ent->vy = phys->wall_jump_vy;
+                int wall_side = physics_check_wall(p_ent, -1) ? -1 : 1;
+                p_ent->vx = (wall_side < 0) ? phys->wall_jump_vx : -phys->wall_jump_vx;
+                p_ent->facing = (wall_side < 0) ? FACING_RIGHT : FACING_LEFT;
+                player_state.tether_cooldown = 0; /* Allow chain tether */
+                player_state.state = PSTATE_JUMP;
+                player_state.tether_hold = 0;
+                audio_play_sfx(SFX_WALL_JUMP);
+            }
+        } else {
+            /* Timer expired: release to normal wall slide */
+            player_state.state = PSTATE_WALL_SLIDE;
+            player_state.tether_hold = 0;
+            player_state.tether_cooldown = 30;
+        }
         return;
     }
 
@@ -683,8 +910,8 @@ void player_update(void) {
             }
         }
         /* Landing impact: spawn dust scaled to airborne time */
-        if (coyote_timer > 4) {
-            int intensity = (coyote_timer > 20) ? 3 : ((coyote_timer > 10) ? 2 : 1);
+        if (player_state.coyote_timer > 4) {
+            int intensity = (player_state.coyote_timer > 20) ? 3 : ((player_state.coyote_timer > 10) ? 2 : 1);
             s32 feet_y = p_ent->y + FP8(12);
             particle_spawn(p_ent->x + FP8(2), feet_y, -80, -40, PART_BURST, 10);
             particle_spawn(p_ent->x + FP8(10), feet_y, 80, -40, PART_BURST, 10);
@@ -701,7 +928,7 @@ void player_update(void) {
             }
         }
         player_state.jumps_remaining = phys->max_jumps;
-        coyote_timer = 0;
+        player_state.coyote_timer = 0;
         /* Track last safe ground position (solid tile, not platform) */
         {
             int foot_x = (int)(p_ent->x >> 8) + p_ent->width / 2;
@@ -714,7 +941,7 @@ void player_update(void) {
         }
     } else {
         /* Coyote time */
-        if (coyote_timer < 255) coyote_timer++;
+        if (player_state.coyote_timer < 255) player_state.coyote_timer++;
     }
 
     /* Jump buffer: decrement each frame */
@@ -739,6 +966,54 @@ void player_update(void) {
 
     /* ---- Input ---- */
 
+    /* ==== Ability Wheel (Hold R to assign, Tap R to use) ==== */
+    if (input_held(KEY_R)) {
+        r_hold_frames++;
+        if (!player_state.ability_wheel_open && !wheel_suppress && r_hold_frames >= 6) {
+            /* Only open if player has at least one ability unlocked */
+            if (player_state.ability_unlocks != 0) {
+                player_state.ability_wheel_open = 1;
+                player_state.ability_wheel_slot = player_state.last_used_ability % 4;
+                player_state.ability_wheel_page = player_state.last_used_ability / 4;
+                audio_play_sfx(SFX_MENU_SELECT);
+            } else {
+                hud_notify("NO ABILITIES", 30);
+            }
+        }
+        if (player_state.ability_wheel_open) {
+            /* D-pad assigns ability and closes wheel */
+            int picked = -1;
+            if (input_hit(KEY_UP))    { player_state.ability_wheel_slot = 0; picked = 0; }
+            if (input_hit(KEY_RIGHT)) { player_state.ability_wheel_slot = 1; picked = 1; }
+            if (input_hit(KEY_DOWN))  { player_state.ability_wheel_slot = 2; picked = 2; }
+            if (input_hit(KEY_LEFT))  { player_state.ability_wheel_slot = 3; picked = 3; }
+            if (input_hit(KEY_SELECT)) player_state.ability_wheel_page ^= 1;
+            if (picked >= 0) {
+                int slot = player_state.ability_wheel_page * 4 + picked;
+                if (player_state.ability_unlocks & (1 << slot)) {
+                    player_state.last_used_ability = (u8)slot;
+                    audio_play_sfx(SFX_PICKUP);
+                }
+                player_state.ability_wheel_open = 0;
+                wheel_suppress = 1; /* Prevent re-open until R released */
+            }
+            /* Skip all other input while wheel is open */
+            goto post_input;
+        }
+    }
+
+    if (input_released(KEY_R)) {
+        wheel_suppress = 0;
+        if (player_state.ability_wheel_open) {
+            /* Close wheel without changing assignment */
+            player_state.ability_wheel_open = 0;
+        } else if (r_hold_frames > 0 && r_hold_frames < 6) {
+            /* Quick-cast tap: fire assigned ability */
+            ability_activate(cls, player_state.last_used_ability);
+        }
+        r_hold_frames = 0;
+    }
+
     /* Horizontal movement */
     if (input_held(KEY_RIGHT)) {
         p_ent->facing = FACING_RIGHT;
@@ -747,7 +1022,7 @@ void player_update(void) {
         } else {
             p_ent->vx += phys->air_accel;
         }
-        if (p_ent->vx > phys->move_speed) p_ent->vx = phys->move_speed;
+        if (p_ent->vx > effective_speed) p_ent->vx = (s16)effective_speed;
     } else if (input_held(KEY_LEFT)) {
         p_ent->facing = FACING_LEFT;
         if (p_ent->on_ground) {
@@ -755,7 +1030,7 @@ void player_update(void) {
         } else {
             p_ent->vx -= phys->air_accel;
         }
-        if (p_ent->vx < -phys->move_speed) p_ent->vx = -phys->move_speed;
+        if (p_ent->vx < -effective_speed) p_ent->vx = (s16)(-effective_speed);
     } else {
         /* Decelerate — full on ground, half in air for platformer feel */
         s16 dec = p_ent->on_ground ? phys->decel : (s16)(phys->decel / 2);
@@ -775,12 +1050,12 @@ void player_update(void) {
     {
         int want_jump = input_hit(KEY_A) || player_state.jump_buffer > 0;
         if (want_jump) {
-            if (p_ent->on_ground || coyote_timer <= COYOTE_FRAMES) {
+            if (p_ent->on_ground || player_state.coyote_timer <= COYOTE_FRAMES) {
                 /* Normal/coyote jump */
                 p_ent->vy = phys->jump_vel;
                 player_state.jumps_remaining = (u8)(phys->max_jumps - 1);
                 p_ent->on_ground = 0;
-                coyote_timer = 255; /* Consume coyote window */
+                player_state.coyote_timer = 255; /* Consume coyote window */
                 player_state.jump_buffer = 0;
                 audio_play_sfx(SFX_JUMP);
             } else if (p_ent->on_wall && phys->can_wall_jump) {
@@ -816,43 +1091,104 @@ void player_update(void) {
         player_state.state = PSTATE_SHOOT;
     }
 
-    /* Dash (R button, Infiltrator only) */
-    int did_dash = 0;
-    if (input_hit(KEY_R) && phys->can_dash &&
-        player_state.dash_timer == 0 && player_state.dash_cooldown == 0) {
-        player_state.dash_timer = phys->dash_frames;
-        p_ent->vx = p_ent->facing == FACING_LEFT ? -phys->dash_speed : phys->dash_speed;
-        /* Phase Ring accessory: boost dash speed */
-        {
-            LootItem* dash_acc = inventory_get_equipped_accessory();
-            if (dash_acc && LOOT_SUBTYPE(dash_acc->type) == ACC_PHASE_RING) {
-                s16 boost = (s16)(dash_acc->stat1 * 16);
-                if (p_ent->facing == FACING_LEFT) p_ent->vx = (s16)(p_ent->vx - boost);
-                else p_ent->vx = (s16)(p_ent->vx + boost);
-            }
-        }
-        p_ent->vy = 0;
-        player_state.state = PSTATE_DASH;
-        /* Dash grants brief invincibility for dodge mechanics */
-        if (player_state.invincible_timer < phys->dash_frames)
-            player_state.invincible_timer = (u8)phys->dash_frames;
-        audio_play_sfx(SFX_DASH);
-        did_dash = 1;
-    }
-
-    /* Abilities: L = cycle selection, R = activate selected */
+    /* ==== L button: class-specific movement skill ==== */
     if (input_hit(KEY_L)) {
-        /* Cycle to next unlocked ability */
-        for (int n = 1; n <= AB_SLOT_COUNT; n++) {
-            int next = (selected_ability + n) & (AB_SLOT_COUNT - 1);
-            if (player_state.ability_unlocks & (1 << next)) {
-                selected_ability = next;
-                break;
+        if (cls == CLASS_TROJAN && player_state.charge_rush_cooldown == 0) {
+            /* Assault: Charge Rush */
+            s16 cvx = 0, cvy = 0;
+            if (input_held(KEY_UP)) {
+                /* Diagonal upward charge */
+                cvx = p_ent->facing == FACING_LEFT ? -448 : 448;
+                cvy = -640;
+            } else if (input_held(KEY_DOWN) && !p_ent->on_ground) {
+                /* Downward slam (airborne only) */
+                cvx = 0;
+                cvy = 768;
+            } else {
+                /* Horizontal charge */
+                cvx = p_ent->facing == FACING_LEFT ? -640 : 640;
+                cvy = 0;
+            }
+            player_state.charge_vx = cvx;
+            player_state.charge_vy = cvy;
+            player_state.charge_rush_timer = 12;
+            player_state.charge_rush_cooldown = 40;
+            player_state.invincible_timer = 12;
+            player_state.state = PSTATE_CHARGE;
+            audio_play_sfx(SFX_CHARGE_RUSH);
+            particle_burst(p_ent->x + FP8(6), p_ent->y + FP8(6), 3, PART_BURST, 180, 12);
+        } else if (cls == CLASS_INFILTRATOR &&
+                   player_state.dash_timer == 0 && player_state.dash_cooldown == 0) {
+            /* Infiltrator: Dash (moved from R to L) */
+            player_state.dash_timer = phys->dash_frames;
+            p_ent->vx = p_ent->facing == FACING_LEFT ? -phys->dash_speed : phys->dash_speed;
+            /* Phase Ring accessory: boost dash speed */
+            {
+                LootItem* dash_acc = inventory_get_equipped_accessory();
+                if (dash_acc && LOOT_SUBTYPE(dash_acc->type) == ACC_PHASE_RING) {
+                    s16 boost = (s16)(dash_acc->stat1 * 16);
+                    if (p_ent->facing == FACING_LEFT) p_ent->vx = (s16)(p_ent->vx - boost);
+                    else p_ent->vx = (s16)(p_ent->vx + boost);
+                }
+            }
+            p_ent->vy = 0;
+            player_state.state = PSTATE_DASH;
+            if (player_state.invincible_timer < phys->dash_frames)
+                player_state.invincible_timer = (u8)phys->dash_frames;
+            audio_play_sfx(SFX_DASH);
+        } else if (cls == CLASS_TECHNOMANCER && player_state.tether_cooldown == 0) {
+            /* Technomancer: Tether Dash — scan for solid tile along d-pad direction */
+            int scan_dx = 0, scan_dy = 0;
+            if (input_held(KEY_UP)) {
+                scan_dy = -1;
+                if (input_held(KEY_LEFT)) scan_dx = -1;
+                else if (input_held(KEY_RIGHT)) scan_dx = 1;
+            } else if (input_held(KEY_DOWN)) {
+                scan_dy = 1;
+            } else {
+                scan_dx = p_ent->facing == FACING_LEFT ? -1 : 1;
+            }
+            /* Scan for solid tile within 6 tiles along direction */
+            int px = (int)(p_ent->x >> 8) + p_ent->width / 2;
+            int py = (int)(p_ent->y >> 8) + p_ent->height / 2;
+            int base_tx = px >> 3;
+            int base_ty = py >> 3;
+            int found = 0;
+            for (int i = 1; i <= 6; i++) {
+                int tx = base_tx + scan_dx * i;
+                int ty = base_ty + scan_dy * i;
+                /* Bounds check */
+                if (tx < 0 || tx >= NET_MAP_W || ty < 0 || ty >= NET_MAP_H) break;
+                /* Check tile at pixel center of that tile */
+                int tile = collision_tile_at(tx * 8 + 4, ty * 8 + 4);
+                if (tile == TILE_SOLID) {
+                    /* Target = one tile before the solid tile */
+                    player_state.tether_target_x = (s32)(tx - scan_dx) * 8 * 256;
+                    player_state.tether_target_y = (s32)(ty - scan_dy) * 8 * 256;
+                    /* Clamp to level bounds */
+                    if (player_state.tether_target_x < 0) player_state.tether_target_x = 0;
+                    if (player_state.tether_target_y < 0) player_state.tether_target_y = 0;
+                    s32 max_tx = (s32)(NET_MAP_W * 8 - PLAYER_HITBOX_W) << 8;
+                    s32 max_ty = (s32)(NET_MAP_H * 8 - PLAYER_HITBOX_H) << 8;
+                    if (player_state.tether_target_x > max_tx) player_state.tether_target_x = max_tx;
+                    if (player_state.tether_target_y > max_ty) player_state.tether_target_y = max_ty;
+                    found = 1;
+                    break;
+                }
+            }
+            if (found) {
+                player_state.state = PSTATE_TETHER;
+                player_state.tether_timer = 30; /* Max 30 frames to reach target */
+                player_state.tether_cooldown = 30;
+                player_state.invincible_timer = 30; /* Invincible during pull */
+                audio_play_sfx(SFX_TETHER_DASH);
+                particle_spawn(p_ent->x + FP8(6), p_ent->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
+            } else {
+                /* Fizzle: no solid tile found */
+                particle_spawn(p_ent->x + FP8(6), p_ent->y + FP8(6), 0, 0, PART_SPARK, 8);
+                /* Don't consume cooldown on fizzle */
             }
         }
-    }
-    if (input_hit(KEY_R) && !did_dash) {
-        ability_activate(cls, selected_ability);
     }
 
     /* Drop through platform (DOWN on one-way platform) */
@@ -866,6 +1202,7 @@ void player_update(void) {
         }
     }
 
+post_input:
     /* Physics */
     physics_update(p_ent, phys);
 
@@ -976,6 +1313,11 @@ void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
         p_ent->vx /= 2;
         p_ent->vy /= 2;
     }
+    /* Clamp knockback to prevent OOB launches (boss knockback fix) */
+    if (p_ent->vx > MAX_KNOCKBACK) p_ent->vx = MAX_KNOCKBACK;
+    if (p_ent->vx < -MAX_KNOCKBACK) p_ent->vx = -MAX_KNOCKBACK;
+    if (p_ent->vy > MAX_KNOCKBACK) p_ent->vy = MAX_KNOCKBACK;
+    if (p_ent->vy < -MAX_KNOCKBACK) p_ent->vy = -MAX_KNOCKBACK;
     player_state.invincible_timer = 60;
     player_state.state = PSTATE_HIT;
     audio_play_sfx(SFX_PLAYER_HIT);
@@ -1092,9 +1434,8 @@ void player_add_xp(int amount) {
             ach_unlock_celebrate(ACH_MAX_LEVEL);
         }
     }
-    if (xp > 65535) xp = 65535;
     if (xp < 0) xp = 0;
-    player_state.xp = (u16)xp;
+    player_state.xp = (u32)xp;
 }
 
 /* ---- Render ---- */
@@ -1134,7 +1475,12 @@ void player_draw(s32 cam_x, s32 cam_y) {
         frame = 10;
         break;
     case PSTATE_DASH:
+    case PSTATE_CHARGE:   /* Reuse dash animation for charge rush */
+    case PSTATE_TETHER:   /* Reuse dash animation for tether pull */
         frame = 11;
+        break;
+    case PSTATE_TETHER_HOLD:
+        frame = 10; /* Reuse wall slide animation for tether hold */
         break;
     default:
         frame = (p_ent->anim_timer >> 4) & 1; /* idle0/idle1 breathing @ ~4fps */
@@ -1200,12 +1546,13 @@ int player_get_skill_bonus(int branch, int skill_idx) {
     return player_state.skill_tree[idx];
 }
 
-/* ---- Class Evolution ---- */
-
-static const char* const evolution_names[EVOLUTION_COUNT] = {
+/* ---- Class Evolution (legacy — replaced by tier system) ---- */
+/* evolution values: 0=none, 1=Vanguard, 2=Commando, 3=Phantom, 4=Striker, 5=Architect, 6=Hacker */
+#define LEGACY_EVOLUTION_COUNT 7
+static const char* const evolution_names[LEGACY_EVOLUTION_COUNT] = {
     "None",
-    "Vanguard",   /* Assault 1 */
-    "Commando",   /* Assault 2 */
+    "Vanguard",   /* Trojan 1 */
+    "Commando",   /* Trojan 2 */
     "Phantom",    /* Infiltrator 1 */
     "Striker",    /* Infiltrator 2 */
     "Architect",  /* Technomancer 1 */
@@ -1213,27 +1560,27 @@ static const char* const evolution_names[EVOLUTION_COUNT] = {
 };
 
 int player_apply_evolution(int choice) {
-    if (player_state.evolution != EVOLUTION_NONE) return 0;
+    if (player_state.evolution != 0) return 0;
     if (choice < 1 || choice > 2) return 0;
 
     int cls = player_state.player_class;
-    int evo = EVOLUTION_NONE;
+    int evo = 0;
     switch (cls) {
-    case CLASS_ASSAULT:
-        evo = (choice == 1) ? EVOLUTION_VANGUARD : EVOLUTION_COMMANDO;
+    case CLASS_TROJAN:
+        evo = (choice == 1) ? 1 : 2;  /* Vanguard or Commando */
         break;
     case CLASS_INFILTRATOR:
-        evo = (choice == 1) ? EVOLUTION_PHANTOM : EVOLUTION_STRIKER;
+        evo = (choice == 1) ? 3 : 4;  /* Phantom or Striker */
         break;
     case CLASS_TECHNOMANCER:
-        evo = (choice == 1) ? EVOLUTION_ARCHITECT : EVOLUTION_HACKER;
+        evo = (choice == 1) ? 5 : 6;  /* Architect or Hacker */
         break;
     default: return 0;
     }
 
     player_state.evolution = (u8)evo;
     player_state.evolution_pending = 0;
-    ach_unlock_celebrate(ACH_EVOLVED);
+    ach_unlock_celebrate(ACH_TIER_UP);
 
     /* Recompute stats with evolution bonuses */
     s16 old_max_hp = player_state.max_hp;
@@ -1249,7 +1596,7 @@ int player_apply_evolution(int choice) {
 
 const char* player_get_evolution_name(void) {
     int evo = player_state.evolution;
-    if (evo < 0 || evo >= EVOLUTION_COUNT) return "None";
+    if (evo < 0 || evo >= LEGACY_EVOLUTION_COUNT) return "None";
     return evolution_names[evo];
 }
 
@@ -1259,11 +1606,32 @@ static const char* const ach_names[ACH_COUNT] = {
     "Boss Slayer!",    "Speed Run!",     "Pacifist!",
     "Untouchable!",    "Looter!",        "Legendary Find!",
     "Full Set!",       "Craftsman!",     "Master Crafter!",
-    "Evolved!",        "Max Level!",     "Completionist!",
+    "Tier Up!",        "Max Level!",     "Completionist!",
     "Bug Hunter!",     "Millionaire!",   "Skill Master!",
     "NG+ Cleared!",    "True Ghost!",    "Endgame!",
     "Bounty Hunter!",  "Mythic Find!",   "Threat Lv5!",
 };
+
+/* ---- Ability Wheel Accessors (for HUD rendering by Stream 3) ---- */
+
+u8 player_ability_wheel_is_open(void) {
+    return player_state.ability_wheel_open;
+}
+
+u8 player_ability_wheel_slot(void) {
+    return player_state.ability_wheel_slot;
+}
+
+u8 player_ability_wheel_page(void) {
+    return player_state.ability_wheel_page;
+}
+
+/* ---- Charge Rush Contact Damage ----
+ * INTEGRATION NOTE: enemy.c should call this when the player is in PSTATE_CHARGE
+ * to determine contact damage (1.5x ATK). Returns the damage amount. */
+int player_charge_rush_damage(void) {
+    return player_state.atk * 3 / 2;
+}
 
 /* Achievement unlock with visual celebration */
 void ach_unlock_celebrate(int id) {

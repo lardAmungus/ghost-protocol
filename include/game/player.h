@@ -17,6 +17,9 @@ enum {
     PSTATE_SHOOT,
     PSTATE_HIT,
     PSTATE_DEAD,
+    PSTATE_CHARGE,       /* Assault charge rush */
+    PSTATE_TETHER,       /* Technomancer tether pull */
+    PSTATE_TETHER_HOLD,  /* Technomancer tether wall hold */
 };
 
 /* ---- Ability bitmask flags ---- */
@@ -39,39 +42,94 @@ enum {
 /* ---- XP curve ---- */
 #define MAX_LEVEL 40
 #define BASE_XP   90  /* Linear: BASE_XP * level */
-#define EVOLUTION_LEVEL 20  /* Level at which class evolution is offered */
 
-/* ---- Player stats (persistent across levels) ---- */
+/* ---- Player stats ----
+ *
+ * LAYOUT: The struct is divided into two sections separated by _level_scope_start.
+ *   - PERSISTENT fields (above the marker): never zeroed after character creation.
+ *     These include class, level, XP, stats, inventory, equipment, quest, achievements, etc.
+ *   - LEVEL-SCOPE fields (below the marker): zeroed on every level entry via player_init_level().
+ *     These include position, velocity, movement state, timers, cooldowns, etc.
+ *
+ * This prevents the recurring bug where player_init() zeroes the entire struct and
+ * state_net_enter() must manually save/restore a growing list of persistent fields.
+ *
+ * IMPORTANT: When adding new persistent fields (inventory, quest, etc.), add them
+ * ABOVE _level_scope_start. When adding new per-level fields (timers, state), add
+ * them BELOW _level_scope_start.
+ */
 typedef struct {
-    u8  player_class;     /* CLASS_ASSAULT / INFILTRATOR / TECHNOMANCER */
-    u8  level;            /* 1-20 */
-    u16 xp;              /* Current XP */
-    s16 hp;
+    /* === PERSISTENT (never zeroed after character creation) === */
+    u8  player_class;     /* CLASS_TROJAN / INFILTRATOR / TECHNOMANCER */
+    u8  evolution;        /* 0=none, or legacy evolution value (replaced by tier system) */
+    u16 level;            /* 1-40+ (widened from u8 for NG+ levels) */
+    u32 xp;              /* Current XP (widened from u16 for endgame) */
+    /* INTEGRATION NOTE: xp widened to u32 — other files assigning to u16 SaveData fields
+     * need explicit (u16) casts or widened SaveData fields. */
+    u32 credits;          /* Currency (widened from u16 for endgame economy) */
+    /* INTEGRATION NOTE: credits widened to u32 — same as xp above. */
     s16 max_hp;
     s16 atk;
     s16 def;
     s16 spd;
     s16 lck;
-    u8  ability_unlocks;  /* Bitmask of ABILITY_1..8 */
-    u8  jumps_remaining;  /* Multi-jump counter */
-    u8  dash_timer;       /* Frames remaining in dash */
-    u8  dash_cooldown;    /* Cooldown frames remaining */
-    u8  shoot_cooldown;   /* Frames until next shot */
-    u8  charge_timer;     /* Charged shot timer (Assault) */
-    u8  invincible_timer; /* Iframes after hit */
-    u8  state;            /* PSTATE_* */
-    u16 credits;          /* Currency */
-    u16 cooldown_ability[8]; /* Ability cooldown timers (up to 300), AB_SLOT_COUNT */
     u8  skill_tree[SKILL_TREE_SIZE]; /* Skill ranks (0-3 per skill) */
-    u8  evolution;        /* EVOLUTION_NONE or EVOLUTION_* */
     u8  skill_points;     /* Unspent skill points */
+    u8  ability_unlocks;  /* Bitmask of ABILITY_1..8 */
     u8  evolution_pending; /* 1 if evolution choice available but not yet made */
+    u8  save_slot;        /* Active save slot */
     u16 craft_shards;     /* Crafting currency */
-    u8  jump_buffer;       /* Frames remaining in jump buffer window */
-    s32 last_safe_x;       /* Last safe ground position (8.8 FP) */
-    s32 last_safe_y;       /* Last safe ground position (8.8 FP) */
-    u8  armor_regen_timer; /* Frames until next regen tick */
     u8  armor_flags;       /* Active armor passive bitflags */
+    u8  armor_regen_timer; /* Frames until next regen tick */
+    u8  last_used_ability; /* Assigned ability for R button (persistent) */
+    /* === LEVEL-SCOPE (zeroed on every level entry via player_init_level) === */
+    u8  _level_scope_start; /* Marker: everything from here down gets zeroed */
+    s32 last_safe_x;       /* Last safe ground position (8.8 FP) — level-scope */
+    s32 last_safe_y;       /* Last safe ground position (8.8 FP) — level-scope */
+    s32 x, y;              /* Position (used by entity, mirrored here for scope) */
+    s16 vx, vy;
+    u8  facing;
+    u8  on_ground, on_wall, wall_dir;
+    u8  on_platform;
+    u8  state;             /* PSTATE_* */
+    u8  jumps_remaining;   /* Multi-jump counter */
+    u8  coyote_timer;
+    u8  jump_buffer;       /* Frames remaining in jump buffer window */
+    s16 hp;
+    u8  shoot_cooldown;    /* Frames until next shot */
+    u8  charge_timer;      /* Charged shot timer (Assault) */
+    u8  invincible_timer;  /* Iframes after hit */
+    u8  selected_ability;  /* Currently selected ability slot (0-7) */
+    u16 cooldown_ability[8]; /* Ability cooldown timers */
+    u16 overclock_timer;
+    u16 iron_skin_timer;
+    u16 berserk_timer;
+    u16 smoke_timer;
+    u16 backstab_timer;
+    u16 time_warp_timer;
+    u16 data_shield_timer;
+    u16 nanobots_timer;
+    u16 firewall_timer;
+    u16 overclock_plus_timer;
+    u16 upload_timer;
+    u8  regen_counter;
+    /* Assault: Charge Rush */
+    u8  charge_rush_timer;
+    u8  charge_rush_cooldown;
+    s16 charge_vx, charge_vy;
+    /* Technomancer: Tether Dash */
+    u8  tether_timer;
+    u8  tether_cooldown;
+    u8  tether_hold;
+    u8  tether_hold_timer;
+    s32 tether_target_x, tether_target_y;
+    /* Infiltrator: Dash (moved from old locations) */
+    u8  dash_timer;        /* Frames remaining in dash */
+    u8  dash_cooldown;     /* Cooldown frames remaining */
+    /* Ability wheel */
+    u8  ability_wheel_open;
+    u8  ability_wheel_slot;
+    u8  ability_wheel_page;
 } PlayerState;
 
 #define AFLAG_HAZARD_RESIST  (1 << 0)
@@ -83,8 +141,15 @@ typedef struct {
 
 extern PlayerState player_state;
 
-/* Initialize player entity + state for given class. */
+/* Initialize player for a NEW character (full zeroed state). Only call for character creation. */
 void player_init(int player_class);
+
+/* Zero level-scope fields only. Does NOT create entity or sprite. */
+void player_init_level(void);
+
+/* Full level entry: creates entity, sprite, loads graphics, resets level-scope fields.
+ * Call from state_net_enter() instead of player_init() for existing characters. */
+void player_enter_level(void);
 
 /* Process input and update player. Call once per frame. */
 void player_update(void);
@@ -128,5 +193,15 @@ int player_apply_evolution(int choice);
 
 /* Get evolution name string for the player's current evolution. */
 const char* player_get_evolution_name(void);
+
+/* INTEGRATION NOTE: Stream 3 (HUD) should call these to render the ability wheel overlay.
+ * These return the ability wheel state for HUD rendering. */
+u8 player_ability_wheel_is_open(void);
+u8 player_ability_wheel_slot(void);
+u8 player_ability_wheel_page(void);
+
+/* INTEGRATION NOTE: Stream 2 (enemy.c) should call this during Charge Rush (PSTATE_CHARGE)
+ * to apply contact damage to enemies hit by the charge. Returns damage dealt. */
+int player_charge_rush_damage(void);
 
 #endif /* GAME_PLAYER_H */

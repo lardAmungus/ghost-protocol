@@ -27,10 +27,55 @@
 
 /* ---- Player classes ---- */
 enum {
-    CLASS_ASSAULT = 0,
+    CLASS_TROJAN = 0,
     CLASS_INFILTRATOR,
     CLASS_TECHNOMANCER,
     CLASS_COUNT
+};
+
+/* ---- Tier system ---- */
+#define TIER_NONE       0
+#define TIER_1_LEVEL    5
+#define TIER_2_LEVEL   25
+#define TIER_3_LEVEL   55
+#define MAX_LEVEL_BASE     40
+#define MAX_LEVEL_ENDGAME  99
+
+/* T2 specializations (stored in tier_choices[1]) */
+enum {
+    /* Trojan T2 */
+    SPEC_JUGGERNAUT = 0,
+    SPEC_BERSERKER,
+    /* Infiltrator T2 */
+    SPEC_SPECTER,
+    SPEC_EDGE_RUNNER,
+    /* Technomancer T2 */
+    SPEC_ARCHITECT,
+    SPEC_NETWEAVER,
+    SPEC_T2_COUNT
+};
+
+/* T3 specializations (stored in tier_choices[2]) */
+enum {
+    /* Trojan->Juggernaut T3 */
+    SPEC3_BASTION = 0,
+    SPEC3_WARLORD,
+    /* Trojan->Berserker T3 */
+    SPEC3_REAVER,
+    SPEC3_DEMOLISHER,
+    /* Infiltrator->Specter T3 */
+    SPEC3_WRAITH,
+    SPEC3_SHADE,
+    /* Infiltrator->Edge Runner T3 */
+    SPEC3_RAZOR,
+    SPEC3_CHROME_PHANTOM,
+    /* Technomancer->Architect T3 */
+    SPEC3_MACHINIST,
+    SPEC3_CONDUIT,
+    /* Technomancer->Netweaver T3 */
+    SPEC3_DAEMON,
+    SPEC3_GRIDRUNNER,
+    SPEC3_COUNT
 };
 
 /* ---- Entity subtypes (extend ENT_ENEMY) ---- */
@@ -66,21 +111,6 @@ enum {
     SUBTYPE_PROJ_LASER,
     SUBTYPE_PROJ_HOMING,
     SUBTYPE_PROJ_NOVA,
-};
-
-/* ---- Class evolution types ---- */
-enum {
-    EVOLUTION_NONE = 0,
-    /* Assault evolutions */
-    EVOLUTION_VANGUARD = 1,   /* Tanky: HP+30%, DEF+20%, War Cry enhanced */
-    EVOLUTION_COMMANDO = 2,   /* Damage: ATK+25%, crit+10%, Berserk enhanced */
-    /* Infiltrator evolutions */
-    EVOLUTION_PHANTOM = 3,    /* Stealth: invisibility on dash, Smoke enhanced */
-    EVOLUTION_STRIKER = 4,    /* Speed: SPD+30%, double jump, Time Warp enhanced */
-    /* Technomancer evolutions */
-    EVOLUTION_ARCHITECT = 5,  /* Support: Nanobots enhanced, Firewall permanent */
-    EVOLUTION_HACKER = 6,     /* Offense: Upload AoE, System Crash 2x */
-    EVOLUTION_COUNT
 };
 
 /* ---- Loot rarity tiers ---- */
@@ -134,7 +164,7 @@ enum {
     ACH_FULL_SET,              /* Equip a complete set */
     ACH_CRAFTSMAN,             /* Craft 10 items */
     ACH_MASTER_CRAFTER,        /* Craft a Legendary via fusing */
-    ACH_EVOLVED,               /* Reach class evolution */
+    ACH_TIER_UP,               /* Make first tier class choice */
     ACH_MAX_LEVEL,             /* Reach level 40 */
     ACH_COMPLETIONIST,         /* Complete all 30 story missions */
     ACH_BUG_HUNTER,            /* Complete all 5 bug bounty tiers */
@@ -181,5 +211,23 @@ static inline void codex_unlock(int id) {
 #define GP_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define GP_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define GP_CLAMP(x, lo, hi) GP_MIN(GP_MAX((x), (lo)), (hi))
+
+/* ---- Knockback limit (8.8 fixed-point) ---- */
+#define MAX_KNOCKBACK 1280
+
+/* ---- Level boundary limits (8.8 fixed-point) ---- */
+#define LEVEL_MAX_X (NET_MAP_W * 8 * 256)
+#define LEVEL_MAX_Y (NET_MAP_H * 8 * 256)
+
+/* ---- Placeholder SFX (fallback to existing) ---- */
+#ifndef SFX_CHARGE_RUSH
+#define SFX_CHARGE_RUSH SFX_DASH
+#endif
+#ifndef SFX_TETHER_DASH
+#define SFX_TETHER_DASH SFX_DASH
+#endif
+#ifndef SFX_SHADOW_STEP
+#define SFX_SHADOW_STEP SFX_DASH
+#endif
 
 #endif /* GAME_COMMON_H */
