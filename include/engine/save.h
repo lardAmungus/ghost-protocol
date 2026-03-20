@@ -4,7 +4,7 @@
 #include <tonc.h>
 #include "game/loot.h"
 
-#define SAVE_MAGIC 0x6750726F  /* "gPro" — Ghost Protocol */
+#define SAVE_MAGIC 0x67507232  /* "gPr2" — Ghost Protocol v2 (invalidates old saves) */
 #define SAVE_SLOTS 3
 #define SAVE_SLOT_SIZE 512
 
@@ -16,9 +16,16 @@ typedef struct {
     u32 magic;              /* Validates save exists (4) */
     u16 checksum;           /* CRC-16 of remaining fields (2) */
     /* Player core */
-    u8  player_class;       /* CLASS_TROJAN/INFILTRATOR/TECHNOMANCER (1) */
-    u8  _pad0;              /* Alignment padding (1) */
-    u16 player_level;       /* 1-40 (2) */
+    u8  player_class;       /* 0xFF=classless, CLASS_TROJAN/INFILTRATOR/TECHNOMANCER (1) */
+    u8  tier_choices[3];    /* T1 class, T2 spec, T3 spec (0xFF=unchosen) (3) */
+    u8  skill_ranks[7];     /* Per-skill rank (0-10) (7) */
+    u8  skill_points;       /* Unspent points (1) */
+    u8  slotted_skill;      /* Active skill slot index (0xFF=none) (1) */
+    u8  suit_color;         /* 0-23 (1) */
+    u8  visor_color;        /* 0-23 (1) */
+    u8  buff_charges[4];    /* XP Booster, Shield Charge, Credit Finder, Loot Magnet (4) */
+    u8  _pad0;              /* Alignment padding for u16 player_level (1) */
+    u16 player_level;       /* 0-40 (2) */
     s16 player_hp;          /* Current HP (2) */
     s16 player_max_hp;      /* Max HP (2) */
     u32 player_xp;          /* Current XP (4) */
@@ -27,7 +34,6 @@ typedef struct {
     s16 player_spd;         /* (2) */
     s16 player_lck;         /* (2) */
     u32 credits;            /* Currency (4) */
-    u8  ability_unlocks;    /* Bitmask (1) */
     /* Quest progress */
     u8  quest_act;          /* Story act 0-5 (1) */
     u8  story_mission;      /* Completed story missions 0-20 (1) */
@@ -37,20 +43,16 @@ typedef struct {
     u8  equipped_idx;       /* Which inventory slot is equipped (1) */
     u8  inventory_count;    /* Number of items (1) */
     /* Shop */
-    u8  shop_purchases[9];  /* Purchase counts per item (9) */
+    u8  shop_purchases[6];  /* Purchase counts per item (6) */
     /* Inventory: 20 items x 8 bytes = 160 bytes */
     LootItem inventory[INVENTORY_SIZE]; /* (160) */
     /* Bug bounty persistence */
     u16 bb_high_scores[7];  /* Per-tier high scores (14) */
     u8  bb_highest_unlocked;/* Highest tier unlocked 0-4 (1) */
     u8  bb_total_runs;      /* Total completed runs (1) */
-    /* Skill tree & evolution (Phase 1) */
-    u8  skill_tree[12];     /* Skill ranks (12 skills x rank 0-3) (12) */
-    u8  evolution;          /* legacy evolution value, 0=none (1) */
-    u8  skill_points;       /* Unspent skill points (1) */
-    /* Crafting (Phase 2) */
+    /* Crafting */
     u16 craft_shards;       /* Crafting currency (2) */
-    /* Progression (Phase 6) */
+    /* Progression */
     u8  ng_plus;            /* 0=normal, 1+=NG+ cycle (1) */
     u8  choice_flags;       /* Story choice bits (2 bits x 4 choices) (1) */
     u8  codex_unlocks[32];  /* Bitfield for 256 codex entries (32) */
@@ -71,13 +73,11 @@ typedef struct {
     u8  bb_threat_level;    /* Permanent difficulty scaling (1) */
     u8  bb_highest_level;   /* Highest player level reached (1) */
     u8  endgame_unlocked;   /* 1=endless mode available (1) */
-    u8  last_used_ability;  /* Assigned ability for R button (1) */
     u8  armor_flags;        /* Active armor passive bitflags (1) */
-    u8  evolution_pending;  /* 1 if evolution choice available (1) */
     /* Reserved for future use — size accounts for compiler alignment padding:
      * +1 byte before bb_high_scores (u16 at odd offset needs 2-byte align)
      * +3 bytes before play_time_frames (u32 needs 4-byte align after u8[3]) */
-    u8  reserved[201];      /* Pad to 512 total (including implicit padding) */
+    u8  reserved[203];      /* Pad to 512 total (including implicit padding) */
 } SaveData;                 /* 512 bytes */
 
 _Static_assert(sizeof(SaveData) == SAVE_SLOT_SIZE,

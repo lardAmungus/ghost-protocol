@@ -67,20 +67,24 @@ int save_read_slot(SaveData* data, int slot) {
 void save_defaults(SaveData* data) {
     memset(data, 0, sizeof(SaveData));
     data->magic = SAVE_MAGIC;
-    data->player_class = 0;
-    data->player_level = 1;
-    data->player_hp = 30;
-    data->player_max_hp = 30;
-    data->player_xp = 0;
+    data->player_class = 0xFF;  /* Classless start */
+    data->tier_choices[0] = 0xFF;
+    data->tier_choices[1] = 0xFF;
+    data->tier_choices[2] = 0xFF;
+    data->slotted_skill = 0xFF;
+    data->player_level = 0;     /* Start at level 0 */
+    data->player_hp = 20;
+    data->player_max_hp = 20;
     data->player_atk = 5;
-    data->player_def = 3;
-    data->player_spd = 3;
-    data->player_lck = 1;
-    data->credits = 100;
-    data->ability_unlocks = 0;
-    data->quest_act = 0;
+    data->player_def = 5;
+    data->player_spd = 5;
+    data->player_lck = 5;
+    data->credits = 0;
     data->equipped_idx = 0xFF;
+    data->quest_act = 0;
     data->inventory_count = 0;
+    /* suit_color and visor_color default to 0 (first preset) via memset */
+    /* buff_charges default to 0 via memset */
 
     const u8* payload = (const u8*)&data->player_class;
     int payload_len = (int)sizeof(SaveData) - (int)(payload - (const u8*)data);
