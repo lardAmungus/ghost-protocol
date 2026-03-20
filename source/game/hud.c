@@ -4,12 +4,14 @@
  * Displays HP bar, level, ability cooldowns on BG0 row 0-1.
  * Boss HP bar on rows 18-19 when active.
  */
+#include <tonc.h>
 #include "game/hud.h"
 #include "game/player.h"
 #include "game/loot.h"
 #include "game/common.h"
 #include "game/abilities.h"
 #include "game/levelgen.h"
+#include "game/skills.h"
 #include "engine/text.h"
 #include "engine/audio.h"
 
@@ -110,58 +112,33 @@ void hud_draw(void) {
         text_print(22, 0, "SC");
         text_print_int(24, 0, hud_score);
     } else {
+        /* Row 0: Lv number only (no XP percentage — decluttered) */
         text_print(22, 0, "Lv");
         text_print_int(24, 0, player_state.level);
-        /* XP percentage next to level — "Lv15 42%" */
-        if (player_state.level < MAX_LEVEL) {
-            int xp_need = player_xp_to_next();
-            int pct = (xp_need > 0) ? (int)player_state.xp * 100 / xp_need : 0;
-            if (pct > 99) pct = 99;
-            /* Place after level digits */
-            int ld = (player_state.level >= 10) ? 2 : 1;
-            text_print_int(24 + ld, 0, pct);
-            text_put_char(24 + ld + (pct >= 10 ? 2 : 1), 0, '%');
-        }
     }
 
-    /* Row 1: Ability cooldowns — clear slot first to avoid stale digits */
+    /* Row 1: Slotted skill name + cooldown */
     {
-        static u8 prev_cd[4]; /* Track previous cooldown state for flash */
-        static u8 flash_timer[4]; /* Flash countdown per slot */
-        for (int i = 0; i < 4; i++) {
-            text_clear_rect(i * 4, 1, 4, 1);
-            int cd = player_state.cooldown_ability[i];
-            if (player_state.ability_unlocks & (1 << i)) {
-                /* Detect cooldown→ready transition */
-                if (prev_cd[i] > 0 && cd == 0) {
-                    flash_timer[i] = 16; /* Flash for 16 frames */
-                    audio_play_sfx(SFX_MENU_SELECT);
+        text_clear_rect(0, 1, 15, 1);
+        if (player_state.slotted_skill != 0xFF) {
+            int sid = player_get_skill_id(player_state.slotted_skill);
+            if (sid >= 0) {
+                const SkillDef* sd = skill_get_def(sid);
+                /* Print skill name (truncated to 10 chars) */
+                for (int c = 0; c < 10 && sd->name[c]; c++) {
+                    text_put_char(c, 1, sd->name[c]);
                 }
-                prev_cd[i] = (u8)(cd > 255 ? 255 : cd);
-
-                if (cd > 0) {
-                    /* Dim→bright color: amber when >50% left, green when <50% */
-                    int max_cd = 300; /* rough max */
-                    int pal = (cd * 2 > max_cd) ? (1 << 12) : 0; /* amber or green */
-                    int secs = (cd + 59) / 60;
-                    u16 tile = (u16)(('0' + secs - ' ') | pal);
-                    ((u16*)se_mem[31])[1 * 32 + i * 4] = tile;
+                /* Cooldown or ready indicator */
+                if (player_state.skill_cooldown > 0) {
+                    int rank = player_state.skill_ranks[player_state.slotted_skill];
+                    int max_cd = skill_get_cooldown(sid, rank);
+                    int filled = (max_cd > 0) ? (player_state.skill_cooldown * 6 / max_cd) : 0;
+                    if (filled > 6) filled = 6;
+                    for (int i = 0; i < 6; i++)
+                        text_put_char(11 + i, 1, (i < 6 - filled) ? '=' : '-');
                 } else {
-                    /* Ready indicator — blink 'R' with increasing speed */
-                    if (flash_timer[i] > 0) {
-                        flash_timer[i]--;
-                        /* Blink speed increases: slow→fast as timer counts down */
-                        int blink_rate = (flash_timer[i] > 8) ? 4 : 2;
-                        if (flash_timer[i] % blink_rate < blink_rate / 2)
-                            text_put_char(i * 4, 1, '*');
-                        else
-                            text_put_char(i * 4, 1, 'R');
-                    } else {
-                        text_put_char(i * 4, 1, 'R');
-                    }
+                    text_print(11, 1, ":RDY");
                 }
-            } else {
-                prev_cd[i] = 0;
             }
         }
     }
@@ -266,21 +243,25 @@ void hud_draw(void) {
         }
     }
 
-    /* Row 2: Section minimap (right side) */
+    /* Row 2: Position indicator bar (right side) — shows player progress */
     {
-        /* Calculate current section from camera pixel position */
-        int cam_px = (int)(hud_cam_x >> 8);
-        int cur_section = cam_px / (16 * 8);  /* 16 tiles * 8px per tile = 128px per section */
-        if (cur_section < 0) cur_section = 0;
-        if (cur_section >= NUM_SECTIONS) cur_section = NUM_SECTIONS - 1;
+        static int map_blink;
+        map_blink++;
 
-        /* Draw 16 section markers starting at col 14, row 2 */
-        for (int i = 0; i < NUM_SECTIONS; i++) {
-            if (i == cur_section) {
-                text_put_char(14 + i, 2, '#');
+        int cam_px = (int)(hud_cam_x >> 8);
+        int total_width = NET_MAP_W * 8;
+        int player_pct = (cam_px * 16) / total_width;
+        if (player_pct < 0) player_pct = 0;
+        if (player_pct > 15) player_pct = 15;
+
+        for (int i = 0; i < 16; i++) {
+            char marker;
+            if (i == player_pct) {
+                marker = ((map_blink >> 3) & 1) ? '#' : '@';
             } else {
-                text_put_char(14 + i, 2, '.');
+                marker = '-';
             }
+            text_put_char(14 + i, 2, marker);
         }
     }
 
@@ -325,6 +306,47 @@ void hud_draw(void) {
             col += 3;
         }
         (void)col; /* Suppress unused warning after last check */
+    }
+
+    /* Skill Wheel overlay — shown when SELECT is pressed */
+    {
+        static u8 wheel_was_open;
+        int wheel_open = player_state.skill_wheel_open;
+        if (wheel_open && !wheel_was_open) {
+            /* Apply grey tint — darken BG1+BG2+OBJ */
+            REG_BLDCNT = BLD_BUILD(BLD_BG1 | BLD_BG2 | BLD_OBJ, 0, BLD_BLACK);
+            REG_BLDY = 8;
+        } else if (!wheel_open && wheel_was_open) {
+            /* Restore blend registers */
+            REG_BLDCNT = 0;
+            REG_BLDY = 0;
+            /* Clear wheel text from screen */
+            text_clear_rect(3, 4, 24, 10);
+        }
+        wheel_was_open = (u8)wheel_open;
+
+        if (wheel_open) {
+            int count = player_get_skill_count();
+            text_clear_rect(3, 4, 24, count + 3);
+            /* Title */
+            text_print(8, 4, "SKILLS");
+            for (int i = 0; i < count && i < 7; i++) {
+                int sid = player_get_skill_id(i);
+                if (sid < 0) continue;
+                const SkillDef* sd = skill_get_def(sid);
+                int row = 5 + i;
+                /* Cursor indicator */
+                text_put_char(4, row, (i == player_state.skill_wheel_cursor) ? '>' : ' ');
+                /* Skill name (truncated to 13 chars) */
+                for (int c = 0; c < 13 && sd->name[c]; c++)
+                    text_put_char(6 + c, row, sd->name[c]);
+                /* Rank display */
+                text_print(20, row, "R");
+                text_print_int(21, row, player_state.skill_ranks[i]);
+            }
+            /* Hint */
+            text_print(5, 5 + count, "UP/DN:sel A:slot B:close");
+        }
     }
 
     /* Notification (centered on screen, row 10) */
