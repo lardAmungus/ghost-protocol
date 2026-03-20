@@ -16,6 +16,7 @@
 #include "game/shop.h"
 #include "game/quest.h"
 #include "game/player.h"
+#include "game/skills.h"
 #include "game/loot.h"
 #include "game/bugbounty.h"
 #include "game/boss.h"
@@ -37,7 +38,7 @@ enum {
     TSUB_BB_RESULTS,
     TSUB_STORY,
     TSUB_SKILLS,
-    TSUB_EVOLUTION,
+    TSUB_TIER_SELECT,
     TSUB_CODEX,
     TSUB_CRAFT,
     TSUB_BRIEFING,
@@ -98,7 +99,6 @@ static void pack_save(SaveData* sd) {
     sd->player_spd = player_state.spd;
     sd->player_lck = player_state.lck;
     sd->credits = player_state.credits;
-    sd->ability_unlocks = player_state.ability_unlocks;
     sd->quest_act = quest_state.current_act;
     sd->story_mission = quest_state.story_mission;
     for (int i = 0; i < 6; i++) {
@@ -128,16 +128,16 @@ static void pack_save(SaveData* sd) {
     /* Pack bug bounty state */
     bugbounty_pack(sd->bb_high_scores, &sd->bb_highest_unlocked, &sd->bb_total_runs);
 
-    /* Pack skill tree & evolution */
-    for (int i = 0; i < SKILL_TREE_SIZE; i++) {
-        sd->skill_tree[i] = player_state.skill_tree[i];
-    }
-    sd->evolution = player_state.evolution;
+    /* Pack tier choices, skills & customization */
+    for (int i = 0; i < 3; i++) sd->tier_choices[i] = player_state.tier_choices[i];
+    for (int i = 0; i < MAX_PLAYER_SKILLS; i++) sd->skill_ranks[i] = player_state.skill_ranks[i];
     sd->skill_points = player_state.skill_points;
+    sd->slotted_skill = player_state.slotted_skill;
+    sd->suit_color = player_state.suit_color;
+    sd->visor_color = player_state.visor_color;
+    shop_get_charges_array(sd->buff_charges);
     sd->craft_shards = player_state.craft_shards;
-    sd->last_used_ability = player_state.last_used_ability;
     sd->armor_flags = player_state.armor_flags;
-    sd->evolution_pending = player_state.evolution_pending;
 
     /* Pack game statistics */
     sd->ng_plus = game_stats.ng_plus;
@@ -171,8 +171,6 @@ static void unpack_save(const SaveData* sd) {
     player_state.spd = sd->player_spd;
     player_state.lck = sd->player_lck;
     player_state.credits = sd->credits;
-    player_state.ability_unlocks = sd->ability_unlocks;
-
     quest_state.current_act = sd->quest_act;
     quest_state.story_mission = sd->story_mission;
     for (int i = 0; i < 6; i++) {
@@ -199,16 +197,16 @@ static void unpack_save(const SaveData* sd) {
     /* Restore bug bounty state */
     bugbounty_restore(sd->bb_high_scores, sd->bb_highest_unlocked, sd->bb_total_runs);
 
-    /* Restore skill tree & evolution */
-    for (int i = 0; i < SKILL_TREE_SIZE; i++) {
-        player_state.skill_tree[i] = sd->skill_tree[i];
-    }
-    player_state.evolution = sd->evolution;
+    /* Restore tier choices, skills & customization */
+    for (int i = 0; i < 3; i++) player_state.tier_choices[i] = sd->tier_choices[i];
+    for (int i = 0; i < MAX_PLAYER_SKILLS; i++) player_state.skill_ranks[i] = sd->skill_ranks[i];
     player_state.skill_points = sd->skill_points;
+    player_state.slotted_skill = sd->slotted_skill;
+    player_state.suit_color = sd->suit_color;
+    player_state.visor_color = sd->visor_color;
+    shop_set_charges_array(sd->buff_charges);
     player_state.craft_shards = sd->craft_shards;
-    player_state.last_used_ability = sd->last_used_ability;
     player_state.armor_flags = sd->armor_flags;
-    player_state.evolution_pending = sd->evolution_pending;
 
     /* Restore game statistics */
     game_stats.ng_plus = sd->ng_plus;
@@ -372,17 +370,24 @@ static void update_main(void) {
             text_clear_all();
             break;
         case TMENU_SKILLS:
-            /* Check if evolution is pending first */
-            if (player_state.evolution_pending && player_state.evolution == 0) {
-                sub_state = TSUB_EVOLUTION;
-                cursor = 0;
-                text_clear_all();
+        {
+            int tier_pending = 0;
+            if (player_state.level >= TIER_1_LEVEL && player_state.tier_choices[0] == 0xFF)
+                tier_pending = 1;
+            else if (player_state.level >= TIER_2_LEVEL && player_state.tier_choices[1] == 0xFF)
+                tier_pending = 1;
+            else if (player_state.level >= TIER_3_LEVEL && player_state.tier_choices[2] == 0xFF)
+                tier_pending = 1;
+
+            if (tier_pending) {
+                sub_state = TSUB_TIER_SELECT;
             } else {
                 sub_state = TSUB_SKILLS;
-                cursor = 0;
-                text_clear_all();
             }
+            cursor = 0;
+            text_clear_all();
             break;
+        }
         case TMENU_CRAFT:
             sub_state = TSUB_CRAFT;
             craft_mode = 0;
@@ -883,8 +888,7 @@ static void update_bb_results(void) {
 /* Forward declaration — defined later in draw section */
 static void draw_status_bar(void);
 
-/* ---- Skill tree sub-state ---- */
-static int skill_branch; /* 0=offense, 1=defense, 2=utility */
+/* ---- Skills sub-state (active skill ranking) ---- */
 
 static void update_skills(void) {
     if (input_hit(KEY_B)) {
@@ -894,19 +898,10 @@ static void update_skills(void) {
         text_clear_all();
         return;
     }
-    /* LEFT/RIGHT to change branch */
-    if (input_hit(KEY_LEFT) && skill_branch > 0) {
-        skill_branch--;
-        audio_play_sfx(SFX_MENU_SELECT);
-        text_clear_all();
-    }
-    if (input_hit(KEY_RIGHT) && skill_branch < 2) {
-        skill_branch++;
-        audio_play_sfx(SFX_MENU_SELECT);
-        text_clear_all();
-    }
-    /* UP/DOWN to select skill in branch */
-    if (input_hit(KEY_DOWN) && cursor < SKILLS_PER_BRANCH - 1) {
+    int count = player_get_skill_count();
+    if (count == 0) return; /* No skills unlocked yet */
+
+    if (input_hit(KEY_DOWN) && cursor < count - 1) {
         cursor++;
         audio_play_sfx(SFX_MENU_SELECT);
     }
@@ -914,104 +909,89 @@ static void update_skills(void) {
         cursor--;
         audio_play_sfx(SFX_MENU_SELECT);
     }
-    /* A to allocate skill point */
+    /* A: spend skill point to rank up */
     if (input_hit(KEY_A)) {
-        int idx = skill_branch * SKILLS_PER_BRANCH + cursor;
-        if (player_skill_allocate(idx)) {
-            audio_play_sfx(SFX_MENU_SELECT);
-            hud_notify("SKILL UP!", 45);
-            text_clear_all();
+        if (player_state.skill_points > 0 && cursor < count) {
+            if (player_state.skill_ranks[cursor] < SKILL_MAX_RANK) {
+                player_state.skill_ranks[cursor]++;
+                player_state.skill_points--;
+                audio_play_sfx(SFX_MENU_SELECT);
+                hud_notify("SKILL UP!", 45);
+            } else {
+                audio_play_sfx(SFX_MENU_BACK); /* Max rank */
+            }
         } else {
-            audio_play_sfx(SFX_MENU_BACK);
+            audio_play_sfx(SFX_MENU_BACK); /* No points */
         }
     }
 }
 
-static const char* const skill_names[CLASS_COUNT][SKILL_TREE_SIZE] = {
-    [CLASS_TROJAN] = {
-        /* Offense */  "Crit Chance", "ATK Boost", "Charge Spd", "AoE Radius",
-        /* Defense */  "Max HP", "DEF Boost", "HP Regen", "Resist",
-        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
-    },
-    [CLASS_INFILTRATOR] = {
-        /* Offense */  "Crit Chance", "ATK Boost", "Fire Rate", "Pierce",
-        /* Defense */  "Max HP", "DEF Boost", "Evasion", "Resist",
-        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
-    },
-    [CLASS_TECHNOMANCER] = {
-        /* Offense */  "Crit Chance", "ATK Boost", "Proj Count", "Beam Width",
-        /* Defense */  "Max HP", "DEF Boost", "Shield Dur", "Resist",
-        /* Utility */  "SPD Boost", "LCK Boost", "XP Gain", "Credit Gain",
-    },
-};
-
-static const char* const branch_names[3] = { "OFFENSE", "DEFENSE", "UTILITY" };
-
 static void draw_skills(void) {
-    int cls = player_state.player_class % CLASS_COUNT;
-    terminal_print_pal(2, 1, "SKILL TREE", TPAL_AMBER);
+    terminal_print_pal(2, 1, "ACTIVE SKILLS", TPAL_AMBER);
 
     /* Show SP remaining */
     text_print(18, 1, "SP:");
     text_print_int(21, 1, player_state.skill_points);
 
-    /* Show evolution if any */
-    if (player_state.evolution != 0) {
-        text_print(2, 2, "Class:");
-        terminal_print_pal(9, 2, player_get_evolution_name(), TPAL_CYAN);
+    /* Show tier name */
+    text_print(2, 2, "Path:");
+    terminal_print_pal(8, 2, player_get_tier_name(), TPAL_CYAN);
+
+    int count = player_get_skill_count();
+    if (count == 0) {
+        text_print(2, 5, "No skills yet.");
+        text_print(2, 6, "Choose a class first!");
+        draw_status_bar();
+        return;
     }
 
-    /* Branch tabs */
-    for (int b = 0; b < 3; b++) {
-        int col = 2 + b * 9;
-        if (b == skill_branch) {
-            terminal_print_pal(col, 4, branch_names[b], TPAL_CYAN);
-        } else {
-            text_print(col, 4, branch_names[b]);
-        }
-    }
-    text_print(2, 5, "----------------------------");
+    text_print(2, 3, "----------------------------");
 
-    /* Skills in current branch */
-    for (int s = 0; s < SKILLS_PER_BRANCH; s++) {
-        int row = 7 + s * 2;
-        int idx = skill_branch * SKILLS_PER_BRANCH + s;
-        int rank = player_state.skill_tree[idx];
+    for (int s = 0; s < count; s++) {
+        int row = 5 + s * 2;
+        if (row >= 17) break; /* Don't overflow into status bar */
+
+        int sid = player_get_skill_id(s);
+        if (sid < 0) continue;
+
+        const SkillDef* def = skill_get_def(sid);
+        int rank = player_state.skill_ranks[s];
 
         /* Cursor */
+        text_print(2, row, (s == cursor) ? ">" : " ");
+
+        /* Skill name (truncated to 12 chars) */
+        safe_print(4, row, def->name, 12);
+
+        /* Rank display: Rk N/10 */
+        text_print(17, row, "Rk");
+        text_print_int(19, row, rank);
+        text_print(20 + ((rank >= 10) ? 2 : 1), row, "/10");
+
+        /* Current stats on second row for selected skill */
         if (s == cursor) {
-            text_print(2, row, ">");
-        } else {
-            text_print(2, row, " ");
-        }
-
-        /* Skill name */
-        const char* name = skill_names[cls][idx];
-        text_print(4, row, name);
-
-        /* Rank pips */
-        for (int r = 0; r < SKILL_MAX_RANK; r++) {
-            if (r < rank) {
-                terminal_print_pal(18 + r * 2, row, "#", TPAL_AMBER);
+            int dmg = skill_get_damage(sid, rank, player_state.atk);
+            int cd = skill_get_cooldown(sid, rank);
+            int dur = skill_get_duration(sid, rank);
+            /* Show below skill name */
+            text_clear_rect(4, row + 1, 24, 1);
+            if (def->type == STYPE_BUFF || def->type == STYPE_DEBUFF) {
+                text_print(4, row + 1, "Dur:");
+                text_print_int(8, row + 1, dur / 60);
+                text_print(10, row + 1, "s CD:");
+                text_print_int(15, row + 1, cd / 60);
+                text_put_char(17, row + 1, 's');
             } else {
-                text_print(18 + r * 2, row, ".");
-            }
-        }
-
-        /* Bonus preview */
-        int bonus = rank * 5; /* Each rank = +5% */
-        if (bonus > 0) {
-            text_print(22, row, "+");
-            text_print_int(23, row, bonus);
-            {
-                int bw = (bonus >= 100) ? 3 : (bonus >= 10) ? 2 : 1;
-                text_put_char(23 + bw, row, '%');
+                text_print(4, row + 1, "Dmg:");
+                text_print_int(8, row + 1, dmg);
+                text_print(12, row + 1, "CD:");
+                text_print_int(15, row + 1, cd / 60);
+                text_put_char(17, row + 1, 's');
             }
         }
     }
 
-    text_print(2, 16, "A:Allocate L/R:Branch");
-    text_print(2, 17, "B:Back");
+    text_print(2, 18, "A:Rank Up  B:Back");
     draw_status_bar();
 }
 
@@ -1470,29 +1450,60 @@ static void draw_codex(void) {
     draw_status_bar();
 }
 
-/* ---- Evolution sub-state ---- */
+/* ---- Tier selection sub-state ---- */
 
-static void update_evolution(void) {
-    if (input_hit(KEY_DOWN) && cursor < 1) {
-        cursor = 1;
-        audio_play_sfx(SFX_MENU_SELECT);
+static void update_tier_select(void) {
+    /* Determine which tier is being selected */
+    int tier = 0;
+    int option_count = 0;
+    if (player_state.tier_choices[0] == 0xFF) {
+        tier = 1;
+        option_count = 3; /* 3 T1 classes */
+    } else if (player_state.tier_choices[1] == 0xFF) {
+        tier = 2;
+        option_count = 2;
+    } else if (player_state.tier_choices[2] == 0xFF) {
+        tier = 3;
+        option_count = 2;
     }
-    if (input_hit(KEY_UP) && cursor > 0) {
-        cursor = 0;
+
+    if (input_hit(KEY_LEFT) && cursor > 0) {
+        cursor--;
         audio_play_sfx(SFX_MENU_SELECT);
+        text_clear_all();
+    }
+    if (input_hit(KEY_RIGHT) && cursor < option_count - 1) {
+        cursor++;
+        audio_play_sfx(SFX_MENU_SELECT);
+        text_clear_all();
     }
     if (input_hit(KEY_A)) {
-        if (player_apply_evolution(cursor + 1)) {
-            audio_play_sfx(SFX_EVOLVE);
-            video_flash_start(4, 16);
-            hud_notify("EVOLVED!", 90);
-            sub_state = TSUB_SKILLS;
-            cursor = 0;
-            text_clear_all();
+        if (tier == 1) {
+            /* T1: cursor 0=Trojan, 1=Infiltrator, 2=Technomancer */
+            player_state.tier_choices[0] = (u8)cursor;
+            player_state.player_class = (u8)cursor;
+        } else if (tier == 2) {
+            /* T2: get options from skills.c */
+            int opt_a, opt_b;
+            tier2_get_options(player_state.tier_choices[0], &opt_a, &opt_b);
+            player_state.tier_choices[1] = (u8)(cursor == 0 ? opt_a : opt_b);
+        } else if (tier == 3) {
+            int opt_a, opt_b;
+            tier3_get_options(player_state.tier_choices[1], &opt_a, &opt_b);
+            player_state.tier_choices[2] = (u8)(cursor == 0 ? opt_a : opt_b);
         }
+        /* Auto-slot first new skill if no skill slotted */
+        if (player_state.slotted_skill == 0xFF) {
+            player_state.slotted_skill = 0;
+        }
+        player_recompute_stats();
+        audio_play_sfx(SFX_EVOLVE);
+        hud_notify("TIER UP!", 90);
+        sub_state = TSUB_SKILLS;
+        cursor = 0;
+        text_clear_all();
     }
     if (input_hit(KEY_B)) {
-        /* Allow skipping evolution (can come back later) */
         audio_play_sfx(SFX_MENU_BACK);
         sub_state = TSUB_MAIN;
         cursor = 0;
@@ -1500,32 +1511,54 @@ static void update_evolution(void) {
     }
 }
 
-static const char* const evo_names[CLASS_COUNT][2] = {
-    [CLASS_TROJAN]      = { "VANGUARD", "COMMANDO" },
-    [CLASS_INFILTRATOR]  = { "PHANTOM",  "STRIKER" },
-    [CLASS_TECHNOMANCER] = { "ARCHITECT","HACKER" },
-};
-static const char* const evo_desc[CLASS_COUNT][2] = {
-    [CLASS_TROJAN]      = { "HP+30% DEF+20%", "ATK+25% Crit+10%" },
-    [CLASS_INFILTRATOR]  = { "Stealth SPD+15%", "SPD+30% DblJump" },
-    [CLASS_TECHNOMANCER] = { "HP+15% DEF+15%", "ATK+20% Upload" },
-};
+static void draw_tier_select(void) {
+    int tier = 0;
+    int option_count = 0;
+    if (player_state.tier_choices[0] == 0xFF) {
+        tier = 1;
+        option_count = 3;
+    } else if (player_state.tier_choices[1] == 0xFF) {
+        tier = 2;
+        option_count = 2;
+    } else if (player_state.tier_choices[2] == 0xFF) {
+        tier = 3;
+        option_count = 2;
+    }
 
-static void draw_evolution(void) {
-    int cls = player_state.player_class % CLASS_COUNT;
-    terminal_print_pal(4, 2, "CLASS EVOLUTION", TPAL_AMBER);
-    terminal_print_pal(4, 4, "Level 20 reached!", TPAL_CYAN);
-    text_print(4, 5, "Choose your path:");
+    if (tier == 1) {
+        terminal_print_pal(4, 2, "CHOOSE YOUR CLASS", TPAL_AMBER);
+        terminal_print_pal(4, 4, "Level 5 reached!", TPAL_CYAN);
+    } else if (tier == 2) {
+        terminal_print_pal(4, 2, "CHOOSE SPECIALIZATION", TPAL_AMBER);
+        terminal_print_pal(4, 4, "Level 25 reached!", TPAL_CYAN);
+    } else {
+        terminal_print_pal(4, 2, "CHOOSE MASTERY", TPAL_AMBER);
+        terminal_print_pal(4, 4, "Level 55 reached!", TPAL_CYAN);
+    }
+    text_print(4, 5, "Select your path:");
 
-    for (int c = 0; c < 2; c++) {
-        int row = 8 + c * 4;
+    for (int c = 0; c < option_count; c++) {
+        int row = 8 + c * 3;
+        const char* name = NULL;
+        if (tier == 1) {
+            static const char* const t1[] = { "TROJAN", "INFILTRATOR", "TECHNOMANCER" };
+            name = t1[c];
+        } else if (tier == 2) {
+            int opt_a, opt_b;
+            tier2_get_options(player_state.tier_choices[0], &opt_a, &opt_b);
+            name = tier_get_name(2, (c == 0) ? opt_a : opt_b);
+        } else if (tier == 3) {
+            int opt_a, opt_b;
+            tier3_get_options(player_state.tier_choices[1], &opt_a, &opt_b);
+            name = tier_get_name(3, (c == 0) ? opt_a : opt_b);
+        }
+
         if (c == cursor) {
             terminal_print_pal(3, row, ">", TPAL_AMBER);
         } else {
             text_print(3, row, " ");
         }
-        terminal_print_pal(5, row, evo_names[cls][c], TPAL_CYAN);
-        text_print(5, row + 1, evo_desc[cls][c]);
+        if (name) terminal_print_pal(5, row, name, TPAL_CYAN);
     }
 
     text_print(4, 17, "A:Select  B:Skip");
@@ -1556,7 +1589,7 @@ void state_terminal_update(void) {
     case TSUB_BB_RESULTS: update_bb_results(); break;
     case TSUB_STORY:      update_story(); break;
     case TSUB_SKILLS:     update_skills(); break;
-    case TSUB_EVOLUTION:  update_evolution(); break;
+    case TSUB_TIER_SELECT: update_tier_select(); break;
     case TSUB_CODEX:      update_codex(); break;
     case TSUB_CRAFT:      update_craft(); break;
     case TSUB_BRIEFING:
@@ -1608,20 +1641,21 @@ static int contract_type_pal(int type) {
 
 /* Draw persistent status bar at row 19 */
 static void draw_status_bar(void) {
-    static const char* const cls_short[] = { "ASL", "INF", "TEC" };
-    int cls = player_state.player_class % CLASS_COUNT;
-    terminal_print_pal(1, 19, cls_short[cls], TPAL_CYAN);
-    text_print(5, 19, "Lv");
-    text_print_int(7, 19, player_state.level);
-    text_print(10, 19, "Cr:");
-    text_print_int(13, 19, (int)player_state.credits);
-    /* Show shards if any, otherwise show act */
+    /* Show tier name instead of class abbreviation */
+    const char* tname = player_get_tier_name();
+    /* Truncate to 4 chars for status bar */
+    for (int i = 0; i < 4 && tname[i]; i++)
+        text_put_char(1 + i, 19, tname[i]);
+    text_print(6, 19, "Lv");
+    text_print_int(8, 19, player_state.level);
+    text_print(11, 19, "Cr:");
+    text_print_int(14, 19, (int)player_state.credits);
     if (player_state.craft_shards > 0) {
-        text_print(17, 19, "Sh:");
-        text_print_int(20, 19, player_state.craft_shards);
+        text_print(18, 19, "Sh:");
+        text_print_int(21, 19, player_state.craft_shards);
     } else {
-        text_print(19, 19, "Act:");
-        text_print_int(23, 19, quest_state.current_act);
+        text_print(20, 19, "Act:");
+        text_print_int(24, 19, quest_state.current_act);
     }
 }
 
@@ -1674,11 +1708,22 @@ static void draw_main(void) {
             terminal_print_pal(15, 14, "SP!", TPAL_CYAN);
         }
     }
-    if (player_state.evolution_pending && player_state.evolution == 0) {
-        static int evo_blink;
-        evo_blink++;
-        if (evo_blink & 4) {
-            terminal_print_pal(15, 14, "EVO!", TPAL_AMBER);
+    {
+        int tier_pending = 0;
+        const char* tier_label = NULL;
+        if (player_state.level >= TIER_1_LEVEL && player_state.tier_choices[0] == 0xFF) {
+            tier_pending = 1; tier_label = "CLASS!";
+        } else if (player_state.level >= TIER_2_LEVEL && player_state.tier_choices[1] == 0xFF) {
+            tier_pending = 1; tier_label = "SPEC!";
+        } else if (player_state.level >= TIER_3_LEVEL && player_state.tier_choices[2] == 0xFF) {
+            tier_pending = 1; tier_label = "T3!";
+        }
+        if (tier_pending) {
+            static int tier_blink;
+            tier_blink++;
+            if (tier_blink & 4) {
+                terminal_print_pal(15, 14, tier_label, TPAL_AMBER);
+            }
         }
     }
 
@@ -1780,16 +1825,10 @@ static void draw_contracts(void) {
 }
 
 static void draw_stats(void) {
-    static const char* const class_names[] = { "TROJAN", "INFILTRATOR", "TECHNOMANCER" };
-
     if (stats_page == 0) {
         terminal_print_pal(2, 1, ">> OPERATOR STATS <<", TPAL_AMBER);
         text_print(2, 3, "Class:");
-        if (player_state.evolution != 0) {
-            terminal_print_pal(10, 3, player_get_evolution_name(), TPAL_CYAN);
-        } else {
-            text_print(10, 3, class_names[player_state.player_class % CLASS_COUNT]);
-        }
+        terminal_print_pal(10, 3, player_get_tier_name(), TPAL_CYAN);
 
         text_print(2, 5, "Level:");
         text_print_int(10, 5, player_state.level);
@@ -2499,8 +2538,8 @@ void state_terminal_draw(void) {
     case TSUB_SKILLS:
         draw_skills();
         break;
-    case TSUB_EVOLUTION:
-        draw_evolution();
+    case TSUB_TIER_SELECT:
+        draw_tier_select();
         break;
     case TSUB_CODEX:
         draw_codex();
