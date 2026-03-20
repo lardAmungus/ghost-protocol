@@ -30,8 +30,11 @@
 #include "game/itemdrop.h"
 #include "game/bugbounty.h"
 #include "game/particle.h"
+#include "game/terminal.h"
+#include "game/shop.h"
 #include "states/state_ids.h"
 #include "states/state_net.h"
+#include "states/state_terminal.h"
 
 /* Clamp scaled HP to s16 range (prevents overflow wrapping negative) */
 static inline s16 clamp_hp(int hp) {
@@ -93,7 +96,7 @@ static int milestone_shown; /* Bitmask: 1=50%, 2=90% milestone shown */
 #define COMBO_WINDOW 180  /* 3 seconds to chain next kill */
 
 /* Section tracking */
-static int current_section;  /* Player's current section index */
+/* current_section removed — open-world, no sections */
 
 /* Mission timer */
 static int mission_frames;
@@ -205,12 +208,11 @@ static void spawn_enemies(int tier) {
 
         Entity* e = enemy_spawn(subtype, tx, ty, tier);
 
-        /* Per-section difficulty scaling: enemies in later sections get tougher.
-         * Section 0-3: no bonus. Section 4-7: +10% HP/ATK. 8-11: +20%. 12-15: +30%. */
+        /* Distance-based enemy scaling — stronger further from spawn */
         if (e) {
-            int section = tx / 16;
-            if (section > 3) {
-                int sec_scale = 256 + (section / 4) * 26; /* ~+10% per 4 sections */
+            int dist_from_spawn = tx - (int)level_data.spawn_x;
+            if (dist_from_spawn > 60) {
+                int sec_scale = 256 + (dist_from_spawn / 30) * 26;
                 e->hp = clamp_hp((e->hp * sec_scale) >> 8);
                 enemy_scale_atk(e, sec_scale);
             }
@@ -252,7 +254,6 @@ void state_net_enter(void) {
     combo_count = 0;
     combo_timer = 0;
     prev_kills = 0;
-    current_section = -1;
     mission_frames = 0;
     mission_start_dmg_taken = game_stats.damage_taken;
     enemy_reset_chase_count();
@@ -268,64 +269,28 @@ void state_net_enter(void) {
     networld_load_tileset(act);
     networld_load_parallax(seed, act);
 
-    /* Initialize player at level spawn.
-     * player_init() memsets player_state to 0, so save/restore persistent fields. */
+    /* Initialize player for level entry.
+     * player_enter_level() creates entity+sprite and zeros level-scope fields,
+     * preserving all persistent data (class, stats, inventory, skills, etc.) */
     {
-        u8  saved_class          = player_state.player_class;
-        u8  saved_level          = player_state.level;
-        u16 saved_xp             = player_state.xp;
-        u16 saved_credits        = player_state.credits;
-        u8  saved_unlocks        = player_state.ability_unlocks;
-        /* Save combat stats to preserve shop upgrade bonuses across jack-ins */
-        s16 saved_max_hp         = player_state.max_hp;
-        s16 saved_atk            = player_state.atk;
-        s16 saved_def            = player_state.def;
-        s16 saved_spd            = player_state.spd;
-        s16 saved_lck            = player_state.lck;
-        int had_stats            = (saved_atk > 0); /* 0 = first jack-in, uninitialized */
-        /* Save skill tree and evolution so compute_stats() stays correct after return */
-        u8  saved_skill_tree[SKILL_TREE_SIZE];
-        for (int i = 0; i < SKILL_TREE_SIZE; i++)
-            saved_skill_tree[i] = player_state.skill_tree[i];
-        u8  saved_evolution      = player_state.evolution;
-        u8  saved_evo_pending    = player_state.evolution_pending;
-        u8  saved_skill_points   = player_state.skill_points;
-        u16 saved_craft_shards   = player_state.craft_shards;
-
-        player_init((int)saved_class);
-
-        /* Restore persistent fields wiped by player_init's memset */
-        player_state.level            = saved_level;
-        player_state.xp               = saved_xp;
-        player_state.credits          = saved_credits;
-        player_state.ability_unlocks  = saved_unlocks;
-        player_state.evolution        = saved_evolution;
-        player_state.evolution_pending = saved_evo_pending;
-        player_state.skill_points     = saved_skill_points;
-        player_state.craft_shards     = saved_craft_shards;
-        for (int i = 0; i < SKILL_TREE_SIZE; i++)
-            player_state.skill_tree[i] = saved_skill_tree[i];
-
-        if (had_stats) {
-            /* Subsequent jack-in: restore saved stats (includes shop upgrades) */
-            player_state.max_hp = saved_max_hp;
-            player_state.atk    = saved_atk;
-            player_state.def    = saved_def;
-            player_state.spd    = saved_spd;
-            player_state.lck    = saved_lck;
-        } else {
+        int first_jackin = (player_state.atk <= 0);
+        if (first_jackin) {
             /* First jack-in: compute base stats for this class/level */
-            player_get_base_stats((int)saved_class, (int)saved_level,
+            player_get_base_stats((int)player_state.player_class,
+                                  (int)player_state.level,
                                   &player_state.max_hp, &player_state.atk,
                                   &player_state.def, &player_state.spd,
                                   &player_state.lck);
         }
-        player_state.hp = player_state.max_hp; /* Full heal on jack-in */
+        player_enter_level();
     }
     Entity* player = player_get();
     if (player) {
         player->x = (s32)level_data.spawn_x * 8 * 256; /* tile -> 8.8 px */
         player->y = (s32)level_data.spawn_y * 8 * 256;
+        /* Initialize safe position for death plane fallback */
+        player_state.last_safe_x = player->x;
+        player_state.last_safe_y = player->y;
     }
 
     /* Setup camera */
@@ -430,14 +395,28 @@ void state_net_enter(void) {
 static void update_play(void) {
     /* Pause check */
     if (input_hit(KEY_START)) {
+        /* Force-close ability wheel before pausing */
+        if (player_state.ability_wheel_open) {
+            player_state.ability_wheel_open = 0;
+            REG_BLDCNT = 0;
+            REG_BLDY = 0;
+        }
         sub_state = NETSUB_PAUSE;
         pause_cursor = 0;
+        terminal_overlay_on();
         audio_play_sfx(SFX_MENU_SELECT);
         return;
     }
 
-    /* Player update */
+    /* Player update (always runs — handles ability wheel input too) */
     player_update();
+
+    /* While ability wheel is open, pause everything else (unless dead) */
+    if (player_ability_wheel_is_open()) {
+        if (player_is_alive()) return;
+        /* Force-close wheel on death */
+        player_state.ability_wheel_open = 0;
+    }
 
     /* Check for death — SFX_PLAYER_DIE + shake already fired in player_take_damage */
     if (!player_is_alive()) {
@@ -504,23 +483,33 @@ static void update_play(void) {
     }
 
     /* Check player contact damage with enemies */
-    if (p && player_is_alive() && player_state.invincible_timer == 0) {
+    if (p && player_is_alive()) {
         int hw = entity_get_high_water();
         for (int i = 0; i < hw; i++) {
             Entity* e = entity_get(i);
             if (!e || e->type != ENT_ENEMY || e->hp <= 0) continue;
             if (collision_aabb(p, e)) {
-                s16 kb = (p->x > e->x) ? 128 : -128;
-                player_take_damage(enemy_get_atk(e), kb, -64);
-                /* Quantum Guard: reflect damage back to enemy on contact */
-                if (player_is_alive() && (player_state.armor_flags & AFLAG_REFLECT)) {
-                    LootItem* ref_armor = inventory_get_equipped_armor();
-                    if (ref_armor) {
-                        int ref_dmg = ref_armor->stat1 / 6;
-                        if (ref_dmg > 0) enemy_damage(e, ref_dmg);
-                    }
+                /* Charge Rush: deal contact damage to enemies instead of taking damage */
+                if (player_state.state == PSTATE_CHARGE) {
+                    int rush_dmg = player_charge_rush_damage();
+                    enemy_damage(e, rush_dmg);
+                    hud_floattext_spawn(e->x, e->y - FP8(8), rush_dmg, 0);
+                    particle_burst(e->x + FP8(6), e->y + FP8(6), 3, PART_BURST, 160, 10);
+                    continue; /* Check more enemies — charge hits all in path */
                 }
-                break;
+                if (player_state.invincible_timer == 0) {
+                    s16 kb = (p->x > e->x) ? 128 : -128;
+                    player_take_damage(enemy_get_atk(e), kb, -64);
+                    /* Quantum Guard: reflect damage back to enemy on contact */
+                    if (player_is_alive() && (player_state.armor_flags & AFLAG_REFLECT)) {
+                        LootItem* ref_armor = inventory_get_equipped_armor();
+                        if (ref_armor) {
+                            int ref_dmg = ref_armor->stat1 / 6;
+                            if (ref_dmg > 0) enemy_damage(e, ref_dmg);
+                        }
+                    }
+                    break;
+                }
             }
         }
     }
@@ -542,14 +531,7 @@ static void update_play(void) {
         }
     }
 
-    /* Clamp player to arena during boss fight — prevent knockback escape */
-    if (p && boss_intro_done && boss_is_active()) {
-        s32 arena_min_x = (s32)((NUM_SECTIONS - 1) * 16) * 8 * 256;
-        if (p->x < arena_min_x) {
-            p->x = arena_min_x;
-            p->vx = 0;
-        }
-    }
+    /* No arena confinement — boss fights in open world */
 
     /* Tesla grid toggle: switches every 90 frames with SFX */
     tesla_timer++;
@@ -649,8 +631,13 @@ static void update_play(void) {
                 if (combo_count >= 3 && p) {
                     particle_burst(p->x, p->y - FP8(8), 2, PART_STAR, 160, 14);
                 }
-                /* Bonus XP: combo × 5 */
-                player_add_xp(combo_count * 5);
+                /* Bonus XP: combo × 5 (with XP Booster buff) */
+                {
+                    int combo_xp = combo_count * 5;
+                    if (shop_buff_active(CHARGE_XP_BOOSTER))
+                        combo_xp = combo_xp * 115 / 100;
+                    player_add_xp(combo_xp);
+                }
                 /* Combo heal: 1 HP at 5+, 2 HP at 10+ */
                 if (combo_count >= 5 && player_is_alive()) {
                     int heal = (combo_count >= 10) ? 2 : 1;
@@ -676,14 +663,7 @@ static void update_play(void) {
         }
     }
 
-    /* Section tracking — show name when entering new section */
-    if (p) {
-        int px_tile = (int)(p->x >> 8) / 8;
-        int sec = px_tile / 16;
-        if (sec != current_section && sec >= 0 && sec < NUM_SECTIONS) {
-            current_section = sec;
-        }
-    }
+    /* Section tracking removed — open-world, no sections */
 
     /* Wave respawning for survival/exterminate contracts */
     {
@@ -759,11 +739,11 @@ static void update_play(void) {
                             }
                             Entity* we = enemy_spawn(subtype, stx, sty, tier);
                             if (!we) break; /* Entity pool exhausted */
-                            /* Per-section difficulty scaling for wave spawns */
+                            /* Distance-based difficulty scaling for wave spawns */
                             {
-                                int section = stx / 16;
-                                if (section > 3) {
-                                    int sec_scale = 256 + (section / 4) * 26;
+                                int dist_from_spawn = stx - (int)level_data.spawn_x;
+                                if (dist_from_spawn > 60) {
+                                    int sec_scale = 256 + (dist_from_spawn / 30) * 26;
                                     we->hp = clamp_hp((we->hp * sec_scale) >> 8);
                                     enemy_scale_atk(we, sec_scale);
                                 }
@@ -809,28 +789,30 @@ static void update_play(void) {
 
     /* Ability updates handled inside player_update() */
 
-    /* Boss approach warning — show WARNING when nearing arena */
+    /* Boss approach warning — distance-based */
     if (!boss_warning_shown && !boss_intro_done && boss_is_active() && p) {
         int px_tile = (int)(p->x >> 8) / 8;
-        int arena_start = (NUM_SECTIONS - 1) * 16;
-        if (px_tile >= arena_start - 32) { /* 2 sections before arena */
+        int boss_tx = (int)level_data.boss_tile_x;
+        int dist = px_tile > boss_tx ? px_tile - boss_tx : boss_tx - px_tile;
+        if (dist < 45) { /* ~1.5 screen widths */
             boss_warning_shown = 1;
             hud_notify("WARNING", 45);
             audio_play_sfx(SFX_BOSS_PHASE);
         }
     }
 
-    /* Boss intro cinematic — trigger when player enters boss arena section */
+    /* Boss intro cinematic — triggered when very close */
     if (!boss_intro_done && boss_is_active() && p) {
         int px_tile = (int)(p->x >> 8) / 8;
-        int arena_start = (NUM_SECTIONS - 1) * 16;
-        if (px_tile >= arena_start - 2) {
+        int boss_tx = (int)level_data.boss_tile_x;
+        int dist = px_tile > boss_tx ? px_tile - boss_tx : boss_tx - px_tile;
+        if (dist < 20) { /* Just over half a screen */
             boss_intro_done = 1;
             sub_state = NETSUB_BOSS_INTRO;
-            timer = 80; /* 80-frame cinematic */
+            timer = 80;
             video_shake(4, 2);
             audio_play_sfx(SFX_BOSS_PHASE);
-            return; /* Don't process rest of update this frame */
+            return;
         }
     }
 
@@ -908,102 +890,34 @@ static void update_play(void) {
     hud_set_camera_x(cam.x);
     hud_set_camera(cam.x, cam.y);
 
-    /* Ambient BG palette cycling per section type */
+    /* Ambient BG palette cycling — tier-based (open-world, no sections) */
     ambient_timer++;
     mission_frames++;
     {
-        /* Determine which section the camera center is in */
-        int center_px = (cam.x >> 8) + SCREEN_WIDTH / 2;
-        int sec_idx = center_px / (16 * 8); /* 16 tiles × 8px per section */
-        if (sec_idx < 0) sec_idx = 0;
-        if (sec_idx >= NUM_SECTIONS) sec_idx = NUM_SECTIONS - 1;
-        int sec_type = level_data.sections[sec_idx];
-
-        /* Triangle wave: 0→15→0 over 32 frames */
         int wave = ambient_timer & 31;
-        int pulse = (wave < 16) ? wave : (31 - wave); /* 0-15-0 */
+        int pulse = (wave < 16) ? wave : (31 - wave);
 
-        switch (sec_type) {
-        case SECT_SECURITY:
-            /* Red hazard pulse on palette index 10 (hazard dim) */
-            pal_bg_mem[1 * 16 + 10] = (u16)RGB15(24 + pulse / 2, 4, 2);
-            pal_bg_mem[1 * 16 + 11] = (u16)RGB15(31, 10 + pulse / 2, 6);
-            break;
-        case SECT_WATERFALL:
-            /* Flowing blue shift on circuit glow entries */
-            pal_bg_mem[1 * 16 + 8] = (u16)RGB15(0, 16 + pulse / 2, 24 + pulse / 4);
-            pal_bg_mem[1 * 16 + 14] = (u16)RGB15(6, 10 + pulse, 18 + pulse / 2);
-            break;
-        case SECT_CACHE:
-            /* Golden warmth pulse on accent entries */
-            pal_bg_mem[1 * 16 + 12] = (u16)RGB15(22 + pulse / 2, 18 + pulse / 3, 4);
-            pal_bg_mem[1 * 16 + 13] = (u16)RGB15(31, 28, 10 + pulse / 3);
-            break;
-        case SECT_BOSS:
-            /* Ominous slow pulse on circuit glow */
-            pal_bg_mem[1 * 16 + 9] = (u16)RGB15(4 + pulse / 3, 28 - pulse / 2, 31);
-            break;
-        case SECT_GAUNTLET:
-            /* Aggressive orange pulse on hazard entries */
-            pal_bg_mem[1 * 16 + 10] = (u16)RGB15(24 + pulse / 3, 8 + pulse / 2, 2);
-            pal_bg_mem[1 * 16 + 11] = (u16)RGB15(31, 14 + pulse / 3, 4);
-            break;
-        default:
-            /* Subtle circuit glow breathe on all other sections */
-            if ((ambient_timer & 3) == 0) {
-                int slow = (ambient_timer >> 2) & 31;
-                int sp = (slow < 16) ? slow : (31 - slow);
-                pal_bg_mem[1 * 16 + 9] = (u16)RGB15(4, 28 + sp / 5, 31);
-            }
-            break;
+        /* Tier-scaled ambient glow */
+        if (level_data.tier >= 2) {
+            pal_bg_mem[1 * 16 + 10] = (u16)RGB15(8 + pulse / 4, 4, 2 + pulse / 4);
+        }
+        if (level_data.tier >= 4) {
+            pal_bg_mem[1 * 16 + 11] = (u16)RGB15(4 + pulse / 3, 2, 6 + pulse / 3);
+        }
+        /* Subtle circuit glow breathe */
+        if ((ambient_timer & 3) == 0) {
+            int slow = (ambient_timer >> 2) & 31;
+            int sp = (slow < 16) ? slow : (31 - slow);
+            pal_bg_mem[1 * 16 + 9] = (u16)RGB15(4, 28 + sp / 5, 31);
         }
 
-        /* Ambient section particles — spawn at random visible X */
-        if ((ambient_timer & 15) == 0) { /* Every 16 frames */
+        /* Ambient particles — occasional sparkles */
+        if ((ambient_timer & 15) == 0) {
             s32 rx = cam.x + (s32)((int)rand_range(SCREEN_WIDTH) * 256);
             s32 top_y = cam.y;
-            s32 bot_y = cam.y + FP8(SCREEN_HEIGHT);
-            switch (sec_type) {
-            case SECT_WATERFALL:
-                /* Falling data droplets from top */
-                particle_spawn(rx, top_y, 0, 128, PART_SPARK, 30);
-                break;
-            case SECT_SECURITY:
-                /* Red spark flicker at random position */
+            if ((ambient_timer & 31) == 0) {
                 particle_spawn(rx, top_y + (s32)((int)rand_range(SCREEN_HEIGHT) * 256),
-                               (s16)((int)rand_range(65) - 32), (s16)((int)rand_range(65) - 32),
-                               PART_SPARK, 12);
-                break;
-            case SECT_CACHE:
-                /* Golden dust motes rising from floor */
-                particle_spawn(rx, bot_y - FP8(8), (s16)((int)rand_range(33) - 16), -64, PART_STAR, 28);
-                break;
-            case SECT_BOSS:
-                /* Ominous dim sparkles */
-                particle_spawn(rx, top_y + (s32)((int)rand_range(SCREEN_HEIGHT) * 256),
-                               0, -16, PART_STAR, 24);
-                break;
-            case SECT_GAUNTLET:
-                /* Embers rising */
-                particle_spawn(rx, bot_y, (s16)((int)rand_range(33) - 16), -96, PART_BURST, 20);
-                break;
-            case SECT_NETWORK:
-                /* Data streams: fast vertical spark trails */
-                particle_spawn(rx, top_y, 0, 200, PART_SPARK, 20);
-                break;
-            case SECT_TRANSIT:
-                /* Floating energy motes drifting horizontally */
-                particle_spawn(cam.x - FP8(8),
-                               top_y + (s32)((int)rand_range(SCREEN_HEIGHT) * 256),
-                               96, (s16)((int)rand_range(33) - 16), PART_STAR, 30);
-                break;
-            default:
-                /* Subtle ambient: very occasional faint sparkle */
-                if ((ambient_timer & 31) == 0) {
-                    particle_spawn(rx, top_y + (s32)((int)rand_range(SCREEN_HEIGHT) * 256),
-                                   0, -8, PART_STAR, 20);
-                }
-                break;
+                               0, -8, PART_STAR, 20);
             }
         }
     }
@@ -1235,15 +1149,21 @@ void state_net_update(void) {
                 if (c->type == CONTRACT_STORY && c->story_mission == STORY_MISSIONS) {
                     was_final_act = 1;
                 }
-                /* Award credits (saturate to u16 max) */
+                /* Award credits (with Credit Finder buff) */
                 {
-                    u32 total = (u32)player_state.credits + c->reward_credits;
-                    player_state.credits = (total > 0xFFFF) ? (u16)0xFFFF : (u16)total;
+                    int creds = (int)c->reward_credits;
+                    if (shop_buff_active(CHARGE_CREDIT_FINDER))
+                        creds = creds * 115 / 100;
+                    u32 total = (u32)player_state.credits + (u32)creds;
+                    if (total > 0xFFFFFFFF) total = 0xFFFFFFFF; /* credits is u32 now */
+                    player_state.credits = (u32)total;
                 }
                 /* Award XP — scales with tier and mission for meaningful progression */
                 {
                     int xp = 30 + c->tier * 15;
                     if (c->story_mission > 0) xp += c->story_mission * 10;
+                    if (shop_buff_active(CHARGE_XP_BOOSTER))
+                        xp = xp * 115 / 100;
                     player_add_xp(xp);
                 }
                 quest_complete_active();
@@ -1252,6 +1172,8 @@ void state_net_update(void) {
             if (bb_state.active) {
                 bugbounty_complete();
             }
+            /* Consume one charge of each active buff on mission completion */
+            shop_consume_charges();
             /* Clear blend registers before transition */
             REG_BLDCNT = 0;
             REG_BLDY = 0;
@@ -1317,6 +1239,7 @@ void state_net_update(void) {
             REG_BLDCNT = 0;
             REG_BLDY = 0;
             video_mosaic_obj(0);
+            shop_consume_charges();
             game_request_state = STATE_GAMEOVER;
         }
         break;
@@ -1325,27 +1248,43 @@ void state_net_update(void) {
         video_shake_update(); /* Decay screen shake even while paused */
         if (input_hit(KEY_DOWN)) {
             pause_cursor++;
-            if (pause_cursor > 1) pause_cursor = 0;
+            if (pause_cursor > 5) pause_cursor = 0;
             audio_play_sfx(SFX_MENU_SELECT);
         }
         if (input_hit(KEY_UP)) {
             pause_cursor--;
-            if (pause_cursor < 0) pause_cursor = 1;
+            if (pause_cursor < 0) pause_cursor = 5;
             audio_play_sfx(SFX_MENU_SELECT);
         }
         if (input_hit(KEY_A) || input_hit(KEY_START)) {
-            if (pause_cursor == 0) {
-                /* Resume */
+            switch (pause_cursor) {
+            case 0: /* Resume */
+                terminal_overlay_off();
                 sub_state = NETSUB_PLAY;
-                text_clear_rect(1, 6, 28, 12);
-            } else {
-                /* Disconnect */
+                text_clear_rect(2, 2, 26, 16);
+                break;
+            case 1: /* Abilities — no-op info only */
+                break;
+            case 2: /* Inventory — no-op info only */
+                break;
+            case 3: /* Map — no-op info only */
+                break;
+            case 4: /* Save */
+                state_terminal_save_current(0);
+                audio_play_sfx(SFX_SAVE);
+                hud_notify("SAVED!", 45);
+                break;
+            case 5: /* Quit */
+                terminal_overlay_off();
+                shop_consume_charges();
                 game_request_state = STATE_TERMINAL;
+                break;
             }
         }
         if (input_hit(KEY_B)) {
+            terminal_overlay_off();
             sub_state = NETSUB_PLAY;
-            text_clear_rect(1, 6, 28, 12);
+            text_clear_rect(2, 2, 26, 16);
         }
         break;
     }
@@ -1415,26 +1354,64 @@ void state_net_draw(void) {
 
     /* Pause overlay */
     if (sub_state == NETSUB_PAUSE) {
-        text_print(9, 7, "=== PAUSED ===");
-        text_print(10, 9, (pause_cursor == 0) ? "> Resume" : "  Resume");
-        text_print(10, 11, (pause_cursor == 1) ? "> Disconnect" : "  Disconnect");
+        terminal_draw_panel(3, 3, 16, 27);
 
-        /* Player stats on pause */
-        text_print(2, 13, "Lv");
-        text_print_int(4, 13, player_state.level);
-        text_print(10, 13, "CR:");
-        text_print_int(13, 13, player_state.credits);
+        /* Title row 4 amber */
+        terminal_print_pal(9, 4, "== PAUSED ==", TPAL_AMBER);
 
-        /* Contract progress */
-        Contract* pac = quest_get_active();
-        if (pac) {
-            text_print(2, 15, quest_get_type_name(pac->type));
-            if (pac->type == CONTRACT_EXTERMINATE || pac->type == CONTRACT_SURVIVAL) {
-                text_print(2, 16, "Kills:");
-                text_print_int(9, 16, pac->kills);
-                text_put_char(12, 16, '/');
-                text_print_int(13, 16, pac->kill_target);
+        /* Mission objective row 5 cyan */
+        {
+            Contract* pac = quest_get_active();
+            if (pac) {
+                terminal_print_pal(5, 5, quest_get_type_name(pac->type), TPAL_CYAN);
+                if (pac->type == CONTRACT_EXTERMINATE || pac->type == CONTRACT_SURVIVAL) {
+                    text_print(17, 5, "K:");
+                    text_print_int(19, 5, pac->kills);
+                    text_put_char(22, 5, '/');
+                    text_print_int(23, 5, pac->kill_target);
+                }
             }
+        }
+
+        /* Separator */
+        text_print(4, 7, "------------------------");
+
+        /* Options rows 8-13 */
+        {
+            static const char* const pause_opts[6] = {
+                "RESUME", "ABILITIES", "INVENTORY", "MAP", "SAVE", "QUIT"
+            };
+            for (int i = 0; i < 6; i++) {
+                text_put_char(5, 8 + i, (pause_cursor == i) ? '>' : ' ');
+                text_print(7, 8 + i, pause_opts[i]);
+            }
+        }
+
+        /* Context hint row 15 (changes per highlighted option) */
+        {
+            text_clear_rect(5, 15, 21, 1);
+            static const char* const hints[6] = {
+                "Return to the Net",
+                "View active buffs",
+                "Check your gear",
+                "Section overview",
+                "Quick save to slot 1",
+                "Disconnect to terminal"
+            };
+            terminal_print_pal(5, 15, hints[pause_cursor], TPAL_GREEN);
+        }
+
+        /* Player info row 16 */
+        {
+            static const char* const cls_short[] = { "ASL", "INF", "TEC" };
+            int cls = player_state.player_class % CLASS_COUNT;
+            terminal_print_pal(5, 16, cls_short[cls], TPAL_CYAN);
+            text_print(9, 16, "Lv");
+            text_print_int(11, 16, player_state.level);
+            text_print(14, 16, "HP:");
+            text_print_int(17, 16, player_state.hp);
+            text_put_char(20, 16, '/');
+            text_print_int(21, 16, player_state.max_hp);
         }
     }
 

@@ -899,8 +899,49 @@ void player_update(void) {
 
     /* ---- Input ---- */
 
-    /* ==== R button: fire slotted skill ==== */
-    /* TODO: R-fire and SELECT skill wheel — implemented in Task 11 */
+    /* ==== SELECT: open/close skill wheel ==== */
+    if (input_hit(KEY_SELECT) && player_has_class()) {
+        player_state.skill_wheel_open ^= 1;
+        if (player_state.skill_wheel_open) {
+            player_state.skill_wheel_cursor = player_state.slotted_skill;
+            if (player_state.skill_wheel_cursor == 0xFF)
+                player_state.skill_wheel_cursor = 0;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+    }
+
+    /* D-pad in wheel — blocks other input */
+    if (player_state.skill_wheel_open) {
+        int count = player_get_skill_count();
+        if (input_hit(KEY_UP) && player_state.skill_wheel_cursor > 0)
+            player_state.skill_wheel_cursor--;
+        if (input_hit(KEY_DOWN) && player_state.skill_wheel_cursor < count - 1)
+            player_state.skill_wheel_cursor++;
+        if (input_hit(KEY_A)) {
+            player_state.slotted_skill = player_state.skill_wheel_cursor;
+            player_state.skill_wheel_open = 0;
+            audio_play_sfx(SFX_MENU_SELECT);
+        }
+        if (input_hit(KEY_B) || input_hit(KEY_SELECT)) {
+            player_state.skill_wheel_open = 0;
+            audio_play_sfx(SFX_MENU_BACK);
+        }
+        goto post_input; /* Block movement/combat input while wheel open */
+    }
+
+    /* ==== R: fire slotted skill ==== */
+    if (input_hit(KEY_R) && player_state.slotted_skill != 0xFF) {
+        if (player_state.skill_cooldown == 0) {
+            int sid = player_get_skill_id(player_state.slotted_skill);
+            if (sid >= 0) {
+                int rank = player_state.skill_ranks[player_state.slotted_skill];
+                if (skill_activate(sid, rank, player_state.atk)) {
+                    player_state.skill_cooldown = (u16)skill_get_cooldown(sid, rank);
+                    audio_play_sfx(SFX_ABILITY);
+                }
+            }
+        }
+    }
 
     /* Horizontal movement */
     if (input_held(KEY_RIGHT)) {
@@ -1109,6 +1150,10 @@ post_input:
 
     /* Abilities update */
     ability_update();
+
+    /* Skill cooldown tick */
+    if (player_state.skill_cooldown > 0)
+        player_state.skill_cooldown--;
 
     /* Armor passive: HP regen tick */
     if (player_state.armor_flags & AFLAG_HP_REGEN) {
