@@ -1,9 +1,10 @@
 /*
- * Ghost Protocol — Class Selection Screen
+ * Ghost Protocol — Character Customization Screen
  *
- * Presents the 3 operator classes with stats and abilities before
- * the player enters the terminal hub. Also offers save file loading.
- * Redesigned with circuit board BG, colored stat bars, paginated abilities.
+ * Players choose suit and visor color before starting a new game.
+ * Class selection has been removed — the player starts classless and
+ * picks a T1 class at level 5 via the in-game terminal hub.
+ * Also handles save-slot loading.
  */
 #include <tonc.h>
 #include "states/state_charsel.h"
@@ -11,186 +12,110 @@
 #include "states/state_terminal.h"
 #include "game/player.h"
 #include "game/common.h"
-#include "game/quest.h"
 #include "game/terminal.h"
+#include "game/colors.h"
 #include "engine/text.h"
 #include "engine/input.h"
 #include "engine/audio.h"
 #include "engine/save.h"
 #include <string.h>
 
-/* ---- Layout constants ---- */
-#define SEL_COL   3     /* left margin inside panel */
-
-/* ---- Class data ---- */
-static const char* const class_names[CLASS_COUNT] = {
-    "TROJAN", "INFILTRATOR", "TECHNOMANCER"
-};
-static const char* const class_roles[CLASS_COUNT] = {
-    "HEAVY ASSAULT OPS",
-    "STEALTH INFILTRATOR",
-    "SYSTEMS HACKER"
-};
-static const char* const class_weapons[CLASS_COUNT] = {
-    "BUSTER CANNON",
-    "RAPID SCATTER",
-    "MATRIX RIFLE"
-};
-static const char* const class_playstyle[CLASS_COUNT] = {
-    "TANK & PUNISH",
-    "SPEED & EVASION",
-    "CONTROL & SUPPORT"
-};
-/* Ability names per class (8 abilities) */
-static const char* const class_abilities[CLASS_COUNT][8] = {
-    { "Charged Shot", "Burst Fire",  "Heavy Shell", "Overclock",
-      "Rocket",       "Iron Skin",   "War Cry",     "Berserk"     },
-    { "Air Dash",     "Phase Shot",  "Fan Fire",    "Overload",
-      "Smoke Bomb",   "Backstab",    "Clone",       "Time Warp"   },
-    { "Turret",       "Scan Pulse",  "Data Shield", "Sys Crash",
-      "Nanobots",     "Firewall",    "Overclock+",  "Upload"      },
-};
-/* Short ability descriptions (1 line, max 12 chars for cols 16-27) */
-static const char* const ability_descs[CLASS_COUNT][8] = {
-    { "Hold B burst", "Triple rapid", "Armor pierce", "Speed boost",
-      "Rocket blast", "DEF doubled",  "ATK buff",     "Pwr up DEF-" },
-    { "Air dodge",    "Phase walls",  "Wide scatter",  "Ovld burst",
-      "Break aggro",  "3x backstab",  "Spawn decoy",   "Slow enemies" },
-    { "Auto sentry",  "Reveal foes",  "Halve dmg",     "AoE damage",
-      "HP regen",     "Reflect dmg",  "Halve CDs",     "Mark 2x dmg" },
-};
-/* Level 1 base stats: HP, ATK, DEF, SPD, LCK */
-static const int class_stats[CLASS_COUNT][5] = {
-    { 40, 10, 6, 4, 2 },
-    { 30,  7, 4, 8, 5 },
-    { 35,  8, 7, 5, 3 },
-};
-static const char* const stat_labels[5] = { "HP", "ATK", "DEF", "SPD", "LCK" };
-static const int stat_max[5] = { 40, 10, 7, 8, 5 };
-
-static int selected_class;
-static int cursor;          /* 0 = class select, 1..3 = load slot 1-3 */
-static int any_save;        /* non-zero if at least one slot has data  */
+/* ---- State ---- */
+static int suit_cursor;     /* 0-23 suit color index */
+static int visor_cursor;    /* 0-23 visor color index */
+static int mode;            /* 0=suit, 1=visor, 2=confirm (unused, kept for future) */
+static int cursor;          /* 0=customize, 1..SAVE_SLOTS=load slots */
+static int any_save;
 static int blink_timer;
 static int fade_timer;
 static int fade_target;
 static int fade_in_timer;
-static int ability_page;    /* 0 = abilities 1-4, 1 = abilities 5-8 */
-static int compare_mode;    /* 1 = holding SELECT for 3-class comparison */
 #define FADE_FRAMES 15
 
-/* ---- Helpers ---- */
+/* ---- Local helpers ---- */
 
-/* Draw a colored stat bar: [========--] */
-static void draw_stat_bar(int col, int row, int value, int max_ref, int bar_len) {
-    int filled = (max_ref > 0) ? value * bar_len / max_ref : 0;
-    if (filled > bar_len) filled = bar_len;
-    if (filled < 0) filled = 0;
-    text_put_char(col, row, '[');
-    for (int b = 0; b < bar_len; b++) {
-        text_put_char(col + 1 + b, row, (b < filled) ? '=' : '-');
+/* Return a short tier/class label for a save slot preview. */
+static const char* tier_preview(const SaveData* sd) {
+    if (sd->tier_choices[2] != 0xFF) return "T3";
+    if (sd->tier_choices[1] != 0xFF) return "T2";
+    if (sd->tier_choices[0] != 0xFF) {
+        static const char* const t1n[] = { "TRO", "INF", "TEC" };
+        if (sd->tier_choices[0] < 3) return t1n[sd->tier_choices[0]];
+        return "T1";
     }
-    text_put_char(col + 1 + bar_len, row, ']');
+    return "CLS"; /* Classless */
 }
 
-static void draw_class_page(int cls) {
-    /* Full-screen panel */
-    terminal_draw_panel(0, 0, 19, 29);
-
-    /* Header */
-    terminal_print_pal(SEL_COL, 0, "JACK-IN CONFIGURATION", TPAL_AMBER);
-
-    /* Class number indicator */
-    text_put_char(24, 0, '<');
-    text_put_char(25, 0, (char)('0' + cls + 1));
-    text_put_char(26, 0, '/');
-    text_put_char(27, 0, (char)('0' + CLASS_COUNT));
-    text_put_char(28, 0, '>');
-
-    /* Class name — centered, amber */
-    {
-        const char* nm = class_names[cls];
-        int len = 0;
-        while (nm[len]) len++;
-        int pad = (26 - len) / 2;
-        if (pad < 2) pad = 2;
-        terminal_print_pal(pad, 2, nm, TPAL_AMBER);
-    }
-
-    /* Role and weapon */
-    text_print(SEL_COL, 3, "Role:");
-    terminal_print_pal(SEL_COL + 6, 3, class_roles[cls], TPAL_CYAN);
-    text_print(SEL_COL, 4, "Wpn:");
-    text_print(SEL_COL + 5, 4, class_weapons[cls]);
-
-    /* Stat bars with colors (rows 6-10) */
-    for (int s = 0; s < 5; s++) {
-        int row = 6 + s;
-        int val = class_stats[cls][s];
-        text_print(SEL_COL, row, stat_labels[s]);
-        draw_stat_bar(SEL_COL + 4, row, val, stat_max[s], 8);
-        text_print_int(SEL_COL + 14, row, val);
-    }
-
-    /* Abilities with pagination (rows 12-15) */
-    terminal_print_pal(SEL_COL, 11, "ABILITIES", TPAL_AMBER);
-    {
-        int base = ability_page * 4;
-        text_put_char(14, 11, ability_page == 0 ? '1' : '2');
-        text_put_char(15, 11, '/');
-        text_put_char(16, 11, '2');
-        for (int a = 0; a < 4 && base + a < 8; a++) {
-            int row = 12 + a;
-            int ab_idx = base + a;
-            text_put_char(SEL_COL, row, (char)('1' + ab_idx));
-            text_put_char(SEL_COL + 1, row, ':');
-            text_print(SEL_COL + 2, row, class_abilities[cls][ab_idx]);
-            /* 1-line description on right side */
-            {
-                const char* d = ability_descs[cls][ab_idx];
-                for (int c = 0; d[c] && 16 + c < 28; c++)
-                    text_put_char(16 + c, row, d[c]);
-            }
-        }
-    }
-
-    /* Playstyle */
-    text_print(SEL_COL, 16, "Style:");
-    terminal_print_pal(SEL_COL + 7, 16, class_playstyle[cls], TPAL_GREEN);
+/* Print two-digit zero-padded number at (tx, ty). */
+static void print_two_digit(int tx, int ty, int val) {
+    if (val < 0) val = 0;
+    if (val > 99) val = 99;
+    text_put_char(tx,     ty, (char)('0' + val / 10));
+    text_put_char(tx + 1, ty, (char)('0' + val % 10));
 }
 
-static void draw_comparison(void) {
-    /* 3-class side-by-side comparison */
+static void draw_customization(void) {
     terminal_draw_panel(0, 0, 19, 29);
-    terminal_print_pal(4, 0, "CLASS COMPARISON", TPAL_AMBER);
 
-    /* Column headers */
-    terminal_print_pal(3, 2, "ASL", TPAL_RED);
-    terminal_print_pal(12, 2, "INF", TPAL_CYAN);
-    terminal_print_pal(21, 2, "TEC", TPAL_AMBER);
+    terminal_print_pal(4, 0, "JACK-IN CONFIGURATION", TPAL_AMBER);
+    text_print(4, 1, "---------------------");
 
-    /* Stats for each class */
-    for (int s = 0; s < 5; s++) {
-        int row = 4 + s * 2;
-        text_print(1, row, stat_labels[s]);
-        for (int c = 0; c < 3; c++) {
-            int col = 3 + c * 9;
-            draw_stat_bar(col, row, class_stats[c][s], stat_max[s], 5);
-            text_print_int(col + 7, row, class_stats[c][s]);
-        }
+    /* Suit color row */
+    text_print(2, 3, "SUIT COLOR:");
+    if (mode == 0) {
+        /* Active — show >> XX << */
+        text_print(14, 3, ">> ");
+        print_two_digit(17, 3, suit_cursor);
+        text_print(19, 3, " <<");
+    } else {
+        text_print(14, 3, "[ ");
+        print_two_digit(16, 3, suit_cursor);
+        text_print(18, 3, " ]");
     }
 
-    terminal_print_pal(3, 16, "Release SELECT to return", TPAL_GREEN);
+    /* Visor color row */
+    text_print(2, 4, "VISOR COLOR:");
+    if (mode == 1) {
+        /* Active — show >> XX << */
+        text_print(14, 4, ">> ");
+        print_two_digit(17, 4, visor_cursor);
+        text_print(19, 4, " <<");
+    } else {
+        text_print(14, 4, "[ ");
+        print_two_digit(16, 4, visor_cursor);
+        text_print(18, 4, " ]");
+    }
+
+    /* Color name labels */
+    text_print(2, 6, "Suit: ");
+    text_print_int(8, 6, suit_cursor);
+    text_print(2, 7, "Visor:");
+    text_print_int(8, 7, visor_cursor);
+
+    /* Navigation hints */
+    text_clear_rect(2, 16, 26, 3);
+    text_print(2, 16, "L/R: Change Color");
+    if (mode == 0) {
+        text_print(2, 17, "A: Confirm Suit  B: Title");
+        if (any_save) {
+            text_print(2, 18, "DOWN: Load Save");
+        }
+    } else {
+        text_print(2, 17, "A: Start Game    B: Back");
+    }
 }
 
 static void draw_nav_bar(void) {
-    /* Row 17-18: navigation hints */
-    text_clear_rect(1, 17, 28, 2);
+    text_clear_rect(2, 16, 26, 3);
     if (cursor == 0) {
-        text_print(2, 17, "L/R:Class  SEL:Compare");
-        text_print(2, 18, "A:Jack In  B:Title");
-        if (any_save) {
-            text_print(18, 18, "DN:Load");
+        text_print(2, 16, "L/R: Change Color");
+        if (mode == 0) {
+            text_print(2, 17, "A: Confirm Suit  B: Title");
+            if (any_save) {
+                text_print(2, 18, "DOWN: Load Save");
+            }
+        } else {
+            text_print(2, 17, "A: Start Game    B: Back");
         }
     } else {
         text_print(2, 17, "UP/DN:Slot  A:Load");
@@ -203,32 +128,27 @@ static void draw_nav_bar(void) {
 void state_charsel_enter(void) {
     REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_BG1;
 
-    /* Terminal palettes for text */
     terminal_init_palette();
-
-    /* Load circuit board BG on BG1 */
     terminal_load_bg();
-
     text_clear_all();
 
-    selected_class = 0;
-    cursor = 0;
-    blink_timer = 0;
-    fade_timer = 0;
-    fade_target = 0;
+    suit_cursor  = 0;
+    visor_cursor = 0;
+    mode         = 0;
+    cursor       = 0;
+    blink_timer  = 0;
+    fade_timer   = 0;
+    fade_target  = 0;
     fade_in_timer = FADE_FRAMES;
-    ability_page = 0;
-    compare_mode = 0;
     REG_BLDCNT = BLD_BLACK | BLD_ALL;
-    REG_BLDY = 16;
+    REG_BLDY   = 16;
 
-    /* Check for any existing saves */
     any_save = 0;
     for (int i = 0; i < SAVE_SLOTS; i++) {
         if (save_slot_exists(i)) { any_save = 1; break; }
     }
 
-    draw_class_page(selected_class);
+    draw_customization();
     draw_nav_bar();
 
     audio_play_sfx(SFX_MENU_SELECT);
@@ -238,7 +158,7 @@ void state_charsel_update(void) {
     blink_timer++;
     terminal_tick();
 
-    /* Fade-out to state transition */
+    /* Fade-out: count down, then trigger transition */
     if (fade_timer > 0) {
         fade_timer--;
         REG_BLDY = (u16)(16 - (fade_timer * 16 / FADE_FRAMES));
@@ -254,82 +174,74 @@ void state_charsel_update(void) {
         REG_BLDY = (u16)(fade_in_timer * 16 / FADE_FRAMES);
         if (fade_in_timer == 0) {
             REG_BLDCNT = 0;
-            REG_BLDY = 0;
+            REG_BLDY   = 0;
         }
     }
-
-    /* Compare mode: only via long hold of SELECT (not short tap) */
-    {
-        static int sel_hold;
-        if (input_held(KEY_SELECT)) {
-            sel_hold++;
-            if (sel_hold > 20 && !compare_mode) {
-                compare_mode = 1;
-                text_clear_all();
-            }
-        } else {
-            sel_hold = 0;
-            if (compare_mode) {
-                compare_mode = 0;
-                text_clear_all();
-                draw_class_page(selected_class);
-                draw_nav_bar();
-            }
-        }
-    }
-
-    if (compare_mode) return;
 
     if (cursor == 0) {
-        /* Class selection mode */
-        if (input_hit(KEY_LEFT) || input_hit(KEY_L)) {
-            selected_class--;
-            if (selected_class < 0) selected_class = CLASS_COUNT - 1;
-            ability_page = 0;
-            text_clear_all();
-            draw_class_page(selected_class);
-            draw_nav_bar();
-            audio_play_sfx(SFX_MENU_SELECT);
-        }
-        if (input_hit(KEY_RIGHT) || input_hit(KEY_R)) {
-            selected_class++;
-            if (selected_class >= CLASS_COUNT) selected_class = 0;
-            ability_page = 0;
-            text_clear_all();
-            draw_class_page(selected_class);
-            draw_nav_bar();
-            audio_play_sfx(SFX_MENU_SELECT);
-        }
-        /* SELECT toggles ability page */
-        if (input_hit(KEY_SELECT)) {
-            ability_page ^= 1;
-            text_clear_all();
-            draw_class_page(selected_class);
-            draw_nav_bar();
-            audio_play_sfx(SFX_MENU_SELECT);
-        }
-        if (any_save && (input_hit(KEY_DOWN) || input_hit(KEY_UP))) {
-            /* Enter save-slot selection */
-            cursor = 1;
-            draw_nav_bar();
-            audio_play_sfx(SFX_MENU_SELECT);
-        }
-        if (input_hit(KEY_A)) {
-            /* Confirm class selection — new game */
-            player_state.player_class = (u8)selected_class;
-            audio_play_sfx(SFX_MENU_SELECT);
-            fade_timer = FADE_FRAMES;
-            fade_target = STATE_TERMINAL;
-            REG_BLDCNT = BLD_BLACK | BLD_ALL;
-        }
-        if (input_hit(KEY_B)) {
-            audio_play_sfx(SFX_MENU_BACK);
-            fade_timer = FADE_FRAMES;
-            fade_target = STATE_TITLE;
-            REG_BLDCNT = BLD_BLACK | BLD_ALL;
+        /* Customization mode */
+        if (mode == 0) {
+            /* Suit color selection */
+            if (input_hit(KEY_LEFT) || input_hit(KEY_L)) {
+                suit_cursor--;
+                if (suit_cursor < 0) suit_cursor = COLOR_PRESET_COUNT - 1;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+            if (input_hit(KEY_RIGHT) || input_hit(KEY_R)) {
+                suit_cursor++;
+                if (suit_cursor >= COLOR_PRESET_COUNT) suit_cursor = 0;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+            if (input_hit(KEY_A)) {
+                mode = 1;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+            if (input_hit(KEY_B)) {
+                audio_play_sfx(SFX_MENU_BACK);
+                fade_timer  = FADE_FRAMES;
+                fade_target = STATE_TITLE;
+                REG_BLDCNT  = BLD_BLACK | BLD_ALL;
+            }
+            if (any_save && (input_hit(KEY_DOWN) || input_hit(KEY_UP))) {
+                cursor = 1;
+                draw_nav_bar();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+        } else {
+            /* Visor color selection (mode == 1) */
+            if (input_hit(KEY_LEFT) || input_hit(KEY_L)) {
+                visor_cursor--;
+                if (visor_cursor < 0) visor_cursor = COLOR_PRESET_COUNT - 1;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+            if (input_hit(KEY_RIGHT) || input_hit(KEY_R)) {
+                visor_cursor++;
+                if (visor_cursor >= COLOR_PRESET_COUNT) visor_cursor = 0;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_SELECT);
+            }
+            if (input_hit(KEY_A)) {
+                /* Confirm — start new game classless */
+                player_init(0xFF); /* classless; zeroes entire struct */
+                player_state.suit_color  = (u8)suit_cursor;
+                player_state.visor_color = (u8)visor_cursor;
+                audio_play_sfx(SFX_MENU_SELECT);
+                fade_timer  = FADE_FRAMES;
+                fade_target = STATE_TERMINAL;
+                REG_BLDCNT  = BLD_BLACK | BLD_ALL;
+            }
+            if (input_hit(KEY_B)) {
+                mode = 0;
+                draw_customization();
+                audio_play_sfx(SFX_MENU_BACK);
+            }
         }
     } else {
-        /* Save-slot browse mode: cursor 1-3 = save slots 0-2 */
+        /* Save-slot browse mode: cursor 1-SAVE_SLOTS = slot 0-(SAVE_SLOTS-1) */
         if (input_hit(KEY_UP) || input_hit(KEY_LEFT)) {
             cursor--;
             if (cursor < 1) cursor = 1;
@@ -345,9 +257,9 @@ void state_charsel_update(void) {
             if (save_slot_exists(slot)) {
                 state_terminal_preload_slot(slot);
                 audio_play_sfx(SFX_MENU_SELECT);
-                fade_timer = FADE_FRAMES;
+                fade_timer  = FADE_FRAMES;
                 fade_target = STATE_TERMINAL;
-                REG_BLDCNT = BLD_BLACK | BLD_ALL;
+                REG_BLDCNT  = BLD_BLACK | BLD_ALL;
             } else {
                 cursor = 0;
                 draw_nav_bar();
@@ -363,46 +275,44 @@ void state_charsel_update(void) {
 }
 
 void state_charsel_draw(void) {
-    /* Scroll circuit BG */
+    /* Animate circuit board BG */
     terminal_scroll_bg();
 
-    if (compare_mode) {
-        draw_comparison();
-        return;
-    }
-
-    /* Blink cursor arrow on class name */
+    /* Blink cursor on active color value */
     if (cursor == 0) {
-        int nm_len = 0;
-        const char* nm = class_names[selected_class];
-        while (nm[nm_len]) nm_len++;
-        int pad = (26 - nm_len) / 2;
-        if (pad < 2) pad = 2;
-        if ((blink_timer >> 4) & 1) {
-            text_put_char(pad - 1, 2, '>');
+        int blink_col;
+        int blink_row;
+        if (mode == 0) {
+            blink_col = 13;
+            blink_row = 3;
         } else {
-            text_put_char(pad - 1, 2, ' ');
+            blink_col = 13;
+            blink_row = 4;
+        }
+        if ((blink_timer >> 4) & 1) {
+            text_put_char(blink_col, blink_row, '>');
+        } else {
+            text_put_char(blink_col, blink_row, ' ');
         }
     }
 
-    /* Save slot list overlay when in save mode */
+    /* Save slot overlay */
     if (cursor > 0) {
+        static EWRAM_BSS SaveData sd;
         text_clear_rect(1, 16, 28, 3);
         text_print(2, 16, "---  LOAD SAVE  ---");
         for (int s = 0; s < SAVE_SLOTS; s++) {
             int row = 17 + s;
-            if (row > 18) break; /* Only 2 rows available */
+            if (row > 18) break;
             int slot_sel = (cursor - 1 == s);
             text_put_char(2, row, slot_sel ? '>' : ' ');
             text_print(4, row, "S");
             text_put_char(5, row, (char)('0' + s + 1));
             text_put_char(6, row, ':');
-            static EWRAM_BSS SaveData sd;
             if (save_read_slot(&sd, s)) {
-                static const char* const cn3[] = { "ASL", "INF", "TEC" };
-                text_print(8, row, cn3[sd.player_class % 3]);
+                text_print(8, row, tier_preview(&sd));
                 text_print(12, row, "Lv");
-                text_print_int(14, row, sd.player_level);
+                text_print_int(14, row, (int)sd.player_level);
             } else {
                 text_print(8, row, "EMPTY");
             }
