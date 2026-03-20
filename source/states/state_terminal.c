@@ -75,6 +75,7 @@ static int boot_timer;       /* Boot sequence frame counter */
 static int craft_mode;       /* 0=menu, 1=select items for fuse, 2=select for salvage, 3=select for forge */
 static int craft_sel[3];     /* Selected inventory indices for fuse (up to 3) */
 static int craft_sel_count;  /* Number of items selected for fuse */
+static int craft_confirm;    /* 1=showing fuse preview for confirmation */
 static int choice_active;    /* 1 = showing choice menu */
 static int choice_cursor;    /* 0 = option A, 1 = option B */
 
@@ -392,6 +393,7 @@ static void update_main(void) {
             sub_state = TSUB_CRAFT;
             craft_mode = 0;
             craft_sel_count = 0;
+            craft_confirm = 0;
             cursor = 0;
             text_clear_all();
             break;
@@ -1025,6 +1027,7 @@ static void update_craft(void) {
             /* Back to craft menu */
             craft_mode = 0;
             craft_sel_count = 0;
+            craft_confirm = 0;
             cursor = 0;
             inv_scroll = 0;
             text_clear_all();
@@ -1051,6 +1054,32 @@ static void update_craft(void) {
             audio_play_sfx(SFX_MENU_SELECT);
         }
     } else {
+        /* Fuse confirmation mode */
+        if (craft_mode == 1 && craft_confirm) {
+            if (input_hit(KEY_A)) {
+                if (craft_fuse(craft_sel[0], craft_sel[1], craft_sel[2])) {
+                    /* Success — reset and recompute stats (consumed items may have been equipped) */
+                    player_recompute_stats();
+                    craft_sel_count = 0;
+                    craft_confirm = 0;
+                    cursor = 0;
+                    inv_scroll = 0;
+                } else {
+                    hud_notify("Can't fuse!", 60);
+                    craft_sel_count = 0;
+                    craft_confirm = 0;
+                }
+                text_clear_all();
+            }
+            if (input_hit(KEY_B)) {
+                craft_confirm = 0;
+                craft_sel_count = 0;
+                text_clear_all();
+                audio_play_sfx(SFX_MENU_BACK);
+            }
+            return; /* Block other craft input during confirm */
+        }
+
         /* Item selection mode */
         int count = inventory_count();
         if (count == 0) return;
@@ -1075,17 +1104,10 @@ static void update_craft(void) {
                     audio_play_sfx(SFX_MENU_SELECT);
                 }
                 if (craft_sel_count == 3) {
-                    if (craft_fuse(craft_sel[0], craft_sel[1], craft_sel[2])) {
-                        /* Success — reset and recompute stats (consumed items may have been equipped) */
-                        player_recompute_stats();
-                        craft_sel_count = 0;
-                        cursor = 0;
-                        inv_scroll = 0;
-                    } else {
-                        hud_notify("Can't fuse!", 60);
-                        craft_sel_count = 0;
-                    }
+                    /* Trigger confirmation preview — don't commit yet */
+                    craft_confirm = 1;
                     text_clear_all();
+                    audio_play_sfx(SFX_MENU_SELECT);
                 }
             } else if (craft_mode == 2) {
                 /* Salvage: instant */
@@ -1144,22 +1166,42 @@ static void draw_craft(void) {
         terminal_print_pal(2, 3, mode_names[craft_mode - 1], TPAL_CYAN);
 
         if (craft_mode == 1) {
-            text_print(8, 3, "Select 3 items:");
-            /* Show selected count */
-            text_print_int(24, 3, craft_sel_count);
-            text_print(25, 3, "/3");
-            /* Preview result rarity if items selected */
-            if (craft_sel_count > 0) {
+            if (craft_confirm) {
+                /* Show fuse confirmation with result preview */
+                terminal_print_pal(4, 4, "FUSE PREVIEW", TPAL_AMBER);
+                /* Show source items */
+                for (int i = 0; i < 3; i++) {
+                    LootItem* it = inventory_get(craft_sel[i]);
+                    if (it) {
+                        const char* nm = loot_get_name(it);
+                        safe_print(4, 6 + i, nm, 20);
+                    }
+                }
+                /* Show result rarity */
                 LootItem* sel0 = inventory_get(craft_sel[0]);
                 if (sel0 && sel0->rarity < RARITY_LEGENDARY) {
-                    static const char* const rar_names[] = {
-                        "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"
-                    };
-                    text_print(2, 4, "Result:");
                     int nr = sel0->rarity + 1;
                     int rp = (nr >= 3) ? TPAL_AMBER : TPAL_GREEN;
                     if (nr >= 4) rp = TPAL_RED;
-                    terminal_print_pal(10, 4, rar_names[nr], rp);
+                    text_print(4, 10, "Result rarity:");
+                    terminal_print_pal(18, 10, loot_get_rarity_name(nr), rp);
+                }
+                text_print(4, 13, "A:Confirm  B:Cancel");
+            } else {
+                text_print(8, 3, "Select 3 items:");
+                /* Show selected count */
+                text_print_int(24, 3, craft_sel_count);
+                text_print(25, 3, "/3");
+                /* Preview result rarity if items selected */
+                if (craft_sel_count > 0) {
+                    LootItem* sel0 = inventory_get(craft_sel[0]);
+                    if (sel0 && sel0->rarity < RARITY_LEGENDARY) {
+                        text_print(2, 4, "Result:");
+                        int nr = sel0->rarity + 1;
+                        int rp = (nr >= 3) ? TPAL_AMBER : TPAL_GREEN;
+                        if (nr >= 4) rp = TPAL_RED;
+                        terminal_print_pal(10, 4, loot_get_rarity_name(nr), rp);
+                    }
                 }
             }
         } else if (craft_mode == 2) {
@@ -1187,39 +1229,41 @@ static void draw_craft(void) {
             }
         }
 
-        int row = 5;
-        int idx = 0;
-        for (int i = 0; i < INVENTORY_SIZE && row < 17; i++) {
-            LootItem* item = inventory_get(i);
-            if (!item) continue;
-            if (idx < inv_scroll) { idx++; continue; }
+        if (!craft_confirm) {
+            int row = 5;
+            int idx = 0;
+            for (int i = 0; i < INVENTORY_SIZE && row < 17; i++) {
+                LootItem* item = inventory_get(i);
+                if (!item) continue;
+                if (idx < inv_scroll) { idx++; continue; }
 
-            /* Cursor */
-            text_print(2, row, (idx == cursor) ? ">" : " ");
+                /* Cursor */
+                text_print(2, row, (idx == cursor) ? ">" : " ");
 
-            /* Selected marker for fuse */
-            int selected = 0;
-            for (int s = 0; s < craft_sel_count; s++) {
-                if (craft_sel[s] == i) { selected = 1; break; }
+                /* Selected marker for fuse */
+                int selected = 0;
+                for (int s = 0; s < craft_sel_count; s++) {
+                    if (craft_sel[s] == i) { selected = 1; break; }
+                }
+                text_put_char(3, row, selected ? '*' : ' ');
+
+                /* Item name + rarity */
+                const char* name = loot_get_name(item);
+                int pal = TPAL_GREEN;
+                if (item->rarity >= 3) pal = TPAL_AMBER; /* Epic+ */
+                if (item->rarity >= 4) pal = TPAL_RED;   /* Legendary+ */
+                terminal_print_pal(5, row, name, pal);
+
+                /* Equipped tag */
+                if (item->flags & LOOT_FLAG_EQUIPPED)
+                    text_put_char(28, row, 'E');
+
+                row++;
+                idx++;
             }
-            text_put_char(3, row, selected ? '*' : ' ');
 
-            /* Item name + rarity */
-            const char* name = loot_get_name(item);
-            int pal = TPAL_GREEN;
-            if (item->rarity >= 3) pal = TPAL_AMBER; /* Epic+ */
-            if (item->rarity >= 4) pal = TPAL_RED;   /* Legendary+ */
-            terminal_print_pal(5, row, name, pal);
-
-            /* Equipped tag */
-            if (item->flags & LOOT_FLAG_EQUIPPED)
-                text_put_char(28, row, 'E');
-
-            row++;
-            idx++;
+            text_print(2, 18, "A:Pick  B:Back");
         }
-
-        text_print(2, 18, "A:Pick  B:Back");
     }
     draw_status_bar();
 }
