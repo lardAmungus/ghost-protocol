@@ -1,10 +1,11 @@
 /*
- * Ghost Protocol — Class Abilities
+ * Ghost Protocol — Buff Timers & Skill Activation Bridge
  *
- * Per-class ability activation and effects.
- * 8 abilities per class unlocked at levels 3, 5, 8, 10, 14, 18, 22, 26.
+ * Buff timer state, per-frame tick-down, and skill_activate() dispatch.
+ * Old per-class ability tables/activators removed; skills.h provides data.
  */
 #include "game/abilities.h"
+#include "game/skills.h"
 #include "game/player.h"
 #include "game/projectile.h"
 #include "game/enemy.h"
@@ -16,47 +17,19 @@
 #include "engine/collision.h"
 #include "engine/rng.h"
 
-/* ---- Ability name tables ---- */
-static const char* const assault_names[AB_SLOT_COUNT] = {
-    "Charged Shot", "Burst Fire", "Heavy Shell", "Overclock",
-    "Rocket", "Iron Skin", "War Cry", "Berserk"
-};
-static const char* const infiltrator_names[AB_SLOT_COUNT] = {
-    "Shadow Step", "Phase Shot", "Fan Fire", "Overload",
-    "Smoke Bomb", "Backstab", "Clone", "Time Warp"
-};
-static const char* const technomancer_names[AB_SLOT_COUNT] = {
-    "Turret Deploy", "Scan Pulse", "Data Shield", "System Crash",
-    "Nanobots", "Firewall", "Overclock+", "Upload"
-};
-
-static const int assault_cd[AB_SLOT_COUNT] = {
-    AB_CD_SHORT, 108, AB_CD_LONG, AB_CD_ULTRA,         /* -10% on Power Shot (offensive) */
-    AB_CD_LONG, 108, AB_CD_LONG, 108                    /* -10% on Iron Skin, Berserk */
-};
-static const int infiltrator_cd[AB_SLOT_COUNT] = {
-    AB_CD_SHORT, AB_CD_SHORT, AB_CD_LONG, AB_CD_ULTRA,
-    108, AB_CD_SHORT, AB_CD_LONG, AB_CD_LONG            /* -10% on Smoke Bomb (mobility) */
-};
-static const int technomancer_cd[AB_SLOT_COUNT] = {
-    AB_CD_MEDIUM, AB_CD_SHORT, AB_CD_MEDIUM, AB_CD_ULTRA,
-    AB_CD_MEDIUM, AB_CD_LONG, AB_CD_LONG, AB_CD_MEDIUM
-};
-
 /* ---- Active effect state ---- */
-static int overclock_timer = 0;     /* Assault slot 3: double fire rate */
-static int data_shield_timer = 0;   /* Technomancer slot 2: damage reduction */
-static int iron_skin_timer = 0;     /* Assault slot 5: DEF doubled */
-static int berserk_timer = 0;       /* Assault slot 7: ATK x1.5, DEF x0.5 */
-static int smoke_timer = 0;         /* Infiltrator slot 4: enemies lose tracking */
-static int backstab_timer = 0;      /* Infiltrator slot 5: next hit 3x from behind */
-static int time_warp_timer = 0;     /* Infiltrator slot 6: enemies half speed */
-static int nanobots_timer = 0;      /* Technomancer slot 4: HP regen */
-static int firewall_timer = 0;      /* Technomancer slot 5: damage reflection */
-static int overclock_plus_timer = 0;/* Technomancer slot 6: cooldowns halved */
-static int upload_timer = 0;        /* Technomancer slot 7: marked enemy 2x damage */
-static int nanobots_heal_tick = 0;  /* Counter for nanobot heal ticks */
-static int skill_regen_tick = 0;    /* Counter for passive skill regen */
+static int overclock_timer = 0;
+static int data_shield_timer = 0;
+static int iron_skin_timer = 0;
+static int berserk_timer = 0;
+static int smoke_timer = 0;
+static int backstab_timer = 0;
+static int time_warp_timer = 0;
+static int nanobots_timer = 0;
+static int firewall_timer = 0;
+static int overclock_plus_timer = 0;
+static int upload_timer = 0;
+static int nanobots_heal_tick = 0;
 
 void ability_reset(void) {
     overclock_timer = 0;
@@ -71,364 +44,9 @@ void ability_reset(void) {
     overclock_plus_timer = 0;
     upload_timer = 0;
     nanobots_heal_tick = 0;
-    skill_regen_tick = 0;
-    /* Clear cooldowns so abilities are fresh each level */
-    for (int i = 0; i < AB_SLOT_COUNT; i++) {
-        player_state.cooldown_ability[i] = 0;
-    }
-}
-
-static void activate_assault(int slot) {
-    Entity* pe = player_get();
-    if (!pe) return;
-
-    switch (slot) {
-    case 0: /* Charged Shot — fire a 3x damage projectile */
-    {
-        s16 dir = pe->facing ? -512 : 512;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         (s16)(player_state.atk * 3), SUBTYPE_PROJ_CHARGE, 0, 0);
-        break;
-    }
-    case 1: /* Burst Fire — 3 rapid shots */
-        for (int i = 0; i < 3; i++) {
-            s16 dir = pe->facing ? -448 : 448;
-            s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-            s32 sy = pe->y + FP8(2) + FP8(i * 3);
-            projectile_spawn(sx, sy, dir, 0,
-                             player_state.atk, SUBTYPE_PROJ_RAPID, 0, 0);
-        }
-        break;
-    case 2: /* Heavy Shell — slow piercing shot that hits all enemies in path */
-    {
-        s16 dir = pe->facing ? -320 : 320;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         (s16)(player_state.atk * 3), SUBTYPE_PROJ_BUSTER, PROJ_PIERCE, 0);
-        break;
-    }
-    case 3: /* Overclock — double fire rate for 3 seconds */
-        overclock_timer = 180;
-        hud_notify("OVERCLOCK!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_STAR, 180, 18);
-        break;
-    case 4: /* Rocket — AoE explosion at impact point */
-    {
-        s16 dir = pe->facing ? -384 : 384;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        /* Skill tree[3] (AoE): +25% damage per rank */
-        int rocket_dmg = player_state.atk * 4;
-        if (player_state.skill_tree[3] > 0) {
-            rocket_dmg = rocket_dmg * (100 + player_state.skill_tree[3] * 25) / 100;
-        }
-        /* Single large damage projectile that pierces (simulates AoE) */
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         (s16)rocket_dmg, SUBTYPE_PROJ_CHARGE, PROJ_PIERCE, 0);
-        video_shake(2, 1);
-        particle_burst(sx, pe->y + FP8(4), 2, PART_SPARK, 200, 10);
-        break;
-    }
-    case 5: /* Iron Skin — temp DEF x2 for 3 seconds */
-        iron_skin_timer = 180;
-        hud_notify("IRON SKIN!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 3, PART_STAR, 120, 16);
-        break;
-    case 6: /* War Cry — stun all enemies in 48px radius */
-    {
-        /* Skill tree[3] (AoE): add damage based on rank */
-        int warcry_dmg = 0;
-        if (player_state.skill_tree[3] > 0) {
-            warcry_dmg = player_state.atk * player_state.skill_tree[3] * 25 / 100;
-        }
-        enemy_stun_all(warcry_dmg);
-        video_shake(3, 1);
-        hud_notify("WAR CRY!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 8, PART_SPARK, 250, 15);
-        break;
-    }
-    case 7: /* Berserk — ATK x1.5 but DEF x0.5 for 5 seconds */
-        berserk_timer = 300;
-        hud_notify("BERSERK!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 3, PART_BURST, 200, 12);
-        break;
-    }
-}
-
-static void activate_infiltrator(int slot) {
-    Entity* pe = player_get();
-    if (!pe) return;
-
-    switch (slot) {
-    case 0: /* Shadow Step — teleport 4 tiles (32px) in facing direction */
-    {
-        s32 step_dist = FP8(32); /* 32 pixels = 4 tiles */
-        s32 dest_x;
-        if (pe->facing) {
-            dest_x = pe->x - step_dist;
-        } else {
-            dest_x = pe->x + step_dist;
-        }
-        /* Scan backward from target to find first non-solid tile */
-        int found_clear = 0;
-        int step_dir = pe->facing ? 1 : -1; /* scan back toward player */
-        for (int i = 0; i <= 4; i++) {
-            s32 check_x = dest_x + (s32)(step_dir * i * 8 * 256);
-            int px_check = (int)(check_x >> 8) + pe->width / 2;
-            int py_top = (int)(pe->y >> 8) + 2;
-            int py_bot = (int)(pe->y >> 8) + pe->height - 2;
-            if (!collision_point_solid(px_check, py_top) &&
-                !collision_point_solid(px_check, py_bot)) {
-                dest_x = check_x;
-                found_clear = 1;
-                break;
-            }
-        }
-        if (found_clear) {
-            /* Clamp to world bounds */
-            if (dest_x < 0) dest_x = 0;
-            int level_px = NET_MAP_PX;
-            int max_x = (level_px - pe->width) << 8;
-            if (dest_x > max_x) dest_x = max_x;
-            /* Particles at start position */
-            particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
-            /* Teleport */
-            pe->x = dest_x;
-            /* Particles at destination */
-            particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
-            audio_play_sfx(SFX_SHADOW_STEP);
-        }
-        break;
-    }
-    case 1: /* Phase Shot — passes through walls */
-    {
-        s16 dir = pe->facing ? -512 : 512;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         player_state.atk, SUBTYPE_PROJ_BUSTER, PROJ_PHASE, 0);
-        break;
-    }
-    case 2: /* Fan Fire — 3 projectiles in a forward spread */
-    {
-        s16 dir = pe->facing ? -384 : 384;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        s16 side_dmg = (s16)(player_state.atk * 2 / 3);
-        if (side_dmg < 1) side_dmg = 1;
-        /* Main forward */
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         player_state.atk, SUBTYPE_PROJ_RAPID, 0, 0);
-        /* Upper diagonal */
-        projectile_spawn(sx, pe->y, dir, -128,
-                         side_dmg, SUBTYPE_PROJ_RAPID, 0, 0);
-        /* Lower diagonal */
-        projectile_spawn(sx, pe->y + FP8(8), dir, 128,
-                         side_dmg, SUBTYPE_PROJ_RAPID, 0, 0);
-        break;
-    }
-    case 3: /* Overload — EMP stun: damage and stun all enemies on screen */
-        enemy_stun_all(player_state.atk * 2);
-        video_shake(4, 2);
-        hud_notify("EMP OVERLOAD!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_SPARK, 250, 14);
-        break;
-    case 4: /* Smoke Bomb — enemies lose tracking for 3 seconds */
-        smoke_timer = 180;
-        hud_notify("SMOKE BOMB!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 6, PART_BURST, 150, 24);
-        break;
-    case 5: /* Backstab — next hit from behind deals 3x */
-        backstab_timer = 300;
-        hud_notify("BACKSTAB!", 60);
-        particle_spawn(pe->x + FP8(6), pe->y + FP8(4), 0, -64, PART_STAR, 20);
-        break;
-    case 6: /* Clone — decoy (fires 3 projectiles in opposite direction) */
-    {
-        /* Fire 3 backward distraction shots */
-        s16 dir = pe->facing ? 384 : -384;
-        s32 sx = pe->x + (pe->facing ? FP8(12) : -FP8(4));
-        for (int i = 0; i < 3; i++) {
-            s32 sy = pe->y + FP8(i * 4);
-            projectile_spawn(sx, sy, dir, 0,
-                             (s16)(player_state.atk / 2), SUBTYPE_PROJ_RAPID, 0, 0);
-        }
-        hud_notify("CLONE!", 60);
-        break;
-    }
-    case 7: /* Time Warp — all enemies half speed for 3 seconds */
-        time_warp_timer = 180;
-        hud_notify("TIME WARP!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 6, PART_STAR, 160, 22);
-        break;
-    }
-}
-
-static void activate_technomancer(int slot) {
-    Entity* pe = player_get();
-    if (!pe) return;
-
-    switch (slot) {
-    case 0: /* Turret Deploy — fire 6 projectiles in a forward cone volley */
-    {
-        s16 dir = pe->facing ? -384 : 384;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        /* 3 speeds x 2 angles = 6 projectiles */
-        projectile_spawn(sx, pe->y + FP8(2), dir, -96,
-                         player_state.atk, SUBTYPE_PROJ_BUSTER, 0, 0);
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         player_state.atk, SUBTYPE_PROJ_BUSTER, 0, 0);
-        projectile_spawn(sx, pe->y + FP8(6), dir, 96,
-                         player_state.atk, SUBTYPE_PROJ_BUSTER, 0, 0);
-        projectile_spawn(sx, pe->y + FP8(2), (s16)(dir * 3 / 4), -64,
-                         player_state.atk, SUBTYPE_PROJ_RAPID, 0, 0);
-        projectile_spawn(sx, pe->y + FP8(4), (s16)(dir * 3 / 4), 0,
-                         player_state.atk, SUBTYPE_PROJ_RAPID, 0, 0);
-        projectile_spawn(sx, pe->y + FP8(6), (s16)(dir * 3 / 4), 64,
-                         player_state.atk, SUBTYPE_PROJ_RAPID, 0, 0);
-        break;
-    }
-    case 1: /* Scan Pulse — wide piercing beam that hits all enemies in path */
-    {
-        s16 dir = pe->facing ? -512 : 512;
-        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
-        /* 5 piercing projectiles in a wide spread */
-        projectile_spawn(sx, pe->y - FP8(4), dir, -64,
-                         (s16)(player_state.atk / 2), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        projectile_spawn(sx, pe->y, dir, -32,
-                         (s16)(player_state.atk / 2), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
-                         player_state.atk, SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        projectile_spawn(sx, pe->y + FP8(8), dir, 32,
-                         (s16)(player_state.atk / 2), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        projectile_spawn(sx, pe->y + FP8(12), dir, 64,
-                         (s16)(player_state.atk / 2), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        /* Skill tree[3] (Beam Width): additional beam projectiles per rank */
-        for (int bw = 0; bw < player_state.skill_tree[3]; bw++) {
-            s16 y_offset = (s16)(96 + bw * 48); /* Slight Y spread per extra beam */
-            projectile_spawn(sx, pe->y + FP8(4), dir, y_offset,
-                             (s16)(player_state.atk / 2), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        }
-        break;
-    }
-    case 2: /* Data Shield — reduce damage for 3 seconds */
-        data_shield_timer = 180;
-        hud_notify("DATA SHIELD!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 6, PART_STAR, 140, 20);
-        break;
-    case 3: /* System Crash — screen nuke (4 cardinal directions) */
-    {
-        static const s16 dx[4] = { 384, 0, -384, 0 };
-        static const s16 dy[4] = { 0, -384, 0, 384 };
-        for (int d = 0; d < 4; d++) {
-            projectile_spawn(pe->x + FP8(4), pe->y + FP8(4),
-                             dx[d], dy[d],
-                             (s16)(player_state.atk * 2),
-                             SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        }
-        /* Skill tree[3] (Beam Width): additional beams per rank in each direction */
-        for (int bw = 0; bw < player_state.skill_tree[3]; bw++) {
-            s16 offset = (s16)(96 + bw * 48);
-            /* Extra beams at slight offsets from the 4 cardinal directions */
-            projectile_spawn(pe->x + FP8(4), pe->y + FP8(4),
-                             384, offset,
-                             (s16)(player_state.atk), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-            projectile_spawn(pe->x + FP8(4), pe->y + FP8(4),
-                             -384, -offset,
-                             (s16)(player_state.atk), SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
-        }
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_SPARK, 250, 12);
-        video_shake(3, 1);
-        break;
-    }
-    case 4: /* Nanobots — heal 3 HP/sec for 5 seconds */
-        nanobots_timer = 300;
-        nanobots_heal_tick = 0;
-        hud_notify("NANOBOTS!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_STAR, 120, 24);
-        break;
-    case 5: /* Firewall — damage reflection ring for 3 seconds */
-        firewall_timer = 180;
-        hud_notify("FIREWALL!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_SPARK, 200, 12);
-        break;
-    case 6: /* Overclock+ — all cooldowns halved for 5 seconds */
-        overclock_plus_timer = 300;
-        hud_notify("OVERCLOCK+!", 60);
-        particle_burst(pe->x + FP8(6), pe->y + FP8(6), 5, PART_STAR, 180, 18);
-        break;
-    case 7: /* Upload — marked enemy takes 2x damage for 5 seconds */
-        upload_timer = 300;
-        hud_notify("UPLOAD!", 60);
-        particle_spawn(pe->x + FP8(6), pe->y - FP8(4), 0, -96, PART_STAR, 24);
-        particle_spawn(pe->x + FP8(6), pe->y + FP8(12), 0, 96, PART_STAR, 24);
-        break;
-    }
-}
-
-int ability_activate(int player_class, int slot) {
-    if (slot < 0 || slot >= AB_SLOT_COUNT) return 0;
-
-    /* Check if unlocked */
-    u8 mask = (u8)(1 << slot);
-    if (!(player_state.ability_unlocks & mask)) return 0;
-
-    /* Check cooldown */
-    if (player_state.cooldown_ability[slot] > 0) {
-        audio_play_sfx(SFX_MENU_BACK);
-        return 0;
-    }
-
-    /* Check projectile pool has enough slots for multi-projectile abilities
-     * (Technomancer Turret Deploy spawns 6, Scan Pulse spawns 5) */
-    int active = projectile_active_count();
-    if (active > MAX_PROJECTILES - 6) {
-        audio_play_sfx(SFX_MENU_BACK);
-        return 0;
-    }
-
-    /* Set cooldown */
-    int cd = ability_get_cooldown(player_class, slot);
-
-    /* Skill tree: offense branch index 2 = charge speed (-10/20/30% cooldown) */
-    int cd_reduce = player_state.skill_tree[2] * 10;
-    if (cd_reduce > 0) cd = cd * (100 - cd_reduce) / 100;
-
-    /* Overclock+ halves all cooldowns when active */
-    if (overclock_plus_timer > 0) {
-        cd = cd / 2;
-        if (cd < 30) cd = 30;
-    }
-
-    player_state.cooldown_ability[slot] = (u16)cd;
-
-    audio_play_sfx(SFX_ABILITY);
-
-    switch (player_class) {
-    case CLASS_TROJAN:      activate_assault(slot); break;
-    case CLASS_INFILTRATOR:  activate_infiltrator(slot); break;
-    case CLASS_TECHNOMANCER: activate_technomancer(slot); break;
-    }
-
-    /* Visual feedback: particle burst on activation */
-    {
-        Entity* p = player_get();
-        if (p) {
-            particle_burst(p->x + ((s32)p->width << 7),
-                           p->y + ((s32)p->height << 7),
-                           4, PART_STAR, 200, 16);
-        }
-    }
-
-    return 1;
 }
 
 void ability_update(void) {
-    /* Tick cooldowns */
-    for (int i = 0; i < AB_SLOT_COUNT; i++) {
-        if (player_state.cooldown_ability[i] > 0) {
-            player_state.cooldown_ability[i]--;
-        }
-    }
-
     /* Tick active effects */
     if (overclock_timer > 0) overclock_timer--;
     if (data_shield_timer > 0) data_shield_timer--;
@@ -455,48 +73,9 @@ void ability_update(void) {
             }
         }
     }
-
-    /* Skill tree: defense branch index 2 = passive regen
-     * Rank 1: 1 HP every 300 frames (5s)
-     * Rank 2: 1 HP every 200 frames (3.3s)
-     * Rank 3: 1 HP every 150 frames (2.5s) */
-    {
-        int regen_rank = player_state.skill_tree[6];
-        if (regen_rank > 0 && player_state.hp > 0 && player_state.hp < player_state.max_hp) {
-            static const int regen_intervals[] = { 0, 300, 200, 150 };
-            skill_regen_tick++;
-            if (skill_regen_tick >= regen_intervals[regen_rank]) {
-                skill_regen_tick = 0;
-                player_state.hp++;
-                if (player_state.hp > player_state.max_hp)
-                    player_state.hp = player_state.max_hp;
-            }
-        } else {
-            skill_regen_tick = 0;
-        }
-    }
 }
 
-const char* ability_get_name(int player_class, int slot) {
-    if (slot < 0 || slot >= AB_SLOT_COUNT) return "";
-    switch (player_class) {
-    case CLASS_TROJAN:      return assault_names[slot];
-    case CLASS_INFILTRATOR:  return infiltrator_names[slot];
-    case CLASS_TECHNOMANCER: return technomancer_names[slot];
-    default: return "";
-    }
-}
-
-int ability_get_cooldown(int player_class, int slot) {
-    if (slot < 0 || slot >= AB_SLOT_COUNT) return 0;
-    switch (player_class) {
-    case CLASS_TROJAN:      return assault_cd[slot];
-    case CLASS_INFILTRATOR:  return infiltrator_cd[slot];
-    case CLASS_TECHNOMANCER: return technomancer_cd[slot];
-    default: return 0;
-    }
-}
-
+/* ---- Buff state getters ---- */
 int ability_is_overclock_active(void) {
     return overclock_timer > 0;
 }
@@ -551,24 +130,239 @@ int ability_get_backstab_timer(void) { return backstab_timer; }
 int ability_get_time_warp_timer(void) { return time_warp_timer; }
 int ability_get_nanobots_timer(void) { return nanobots_timer; }
 
-/* ---- Ability Descriptions (short, for ability wheel display) ---- */
-static const char* const ability_descriptions[CLASS_COUNT][AB_SLOT_COUNT] = {
-    /* ASSAULT */
-    { "3x ATK charge blast", "3 rapid projectiles", "3x ATK piercing shot",
-      "Halve fire cooldowns 3s", "4x ATK piercing rocket", "Double DEF 3s",
-      "Stun all enemies", "1.5x ATK, 0.5x DEF 5s" },
-    /* INFILTRATOR */
-    { "Teleport through walls", "Phase through wall shot", "3-dir fan spread",
-      "Damage+stun all enemies", "Enemies lose tracking 3s", "3x backstab dmg 5s",
-      "3 decoy projectiles", "Enemies half speed 3s" },
-    /* TECHNOMANCER */
-    { "6-proj burst volley", "5 piercing scan beams", "Halve damage taken 3s",
-      "4-dir piercing beams", "Heal 3HP/s for 5s", "Reflect half damage 3s",
-      "Halve ability CDs 5s", "Double dmg to target 5s" }
-};
+/* ---- Skill activation dispatch ---- */
 
-const char* ability_get_description(int player_class, int slot) {
-    if (slot < 0 || slot >= AB_SLOT_COUNT) return "";
-    if (player_class < 0 || player_class >= CLASS_COUNT) return "";
-    return ability_descriptions[player_class][slot];
+int skill_activate(int skill_id, int rank, int player_atk) {
+    Entity* pe = player_get();
+    if (!pe) return 0;
+
+    const SkillDef* sd = skill_get_def(skill_id);
+    int dmg = skill_get_damage(skill_id, rank, player_atk);
+    int dur = skill_get_duration(skill_id, rank);
+
+    switch (skill_id) {
+    /* ---- T1: Trojan ---- */
+    case SKILL_CHARGED_SHOT: {
+        s16 dir = pe->facing ? -512 : 512;
+        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
+                         (s16)dmg, SUBTYPE_PROJ_CHARGE, 0, 0);
+        break;
+    }
+    case SKILL_IRON_SKIN:
+        iron_skin_timer = dur;
+        hud_notify("IRON SKIN!", 60);
+        break;
+
+    /* ---- T1: Infiltrator ---- */
+    case SKILL_SHADOW_STEP: {
+        /* Teleport forward */
+        s32 step_dist = FP8(32);
+        s32 dest_x = pe->x + (pe->facing ? -step_dist : step_dist);
+        /* Scan for clear spot */
+        int found = 0;
+        int step_dir = pe->facing ? 1 : -1;
+        for (int i = 0; i <= 4; i++) {
+            s32 cx = dest_x + (s32)(step_dir * i * 8 * 256);
+            int px_c = (int)(cx >> 8) + pe->width / 2;
+            int py_t = (int)(pe->y >> 8) + 2;
+            int py_b = (int)(pe->y >> 8) + pe->height - 2;
+            if (!collision_point_solid(px_c, py_t) &&
+                !collision_point_solid(px_c, py_b)) {
+                dest_x = cx;
+                found = 1;
+                break;
+            }
+        }
+        if (found) {
+            if (dest_x < 0) dest_x = 0;
+            int max_x = (NET_MAP_PX - pe->width) << 8;
+            if (dest_x > max_x) dest_x = max_x;
+            particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
+            pe->x = dest_x;
+            particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
+            audio_play_sfx(SFX_SHADOW_STEP);
+        }
+        break;
+    }
+    case SKILL_PHASE_SHOT: {
+        s16 dir = pe->facing ? -512 : 512;
+        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
+                         (s16)dmg, SUBTYPE_PROJ_BUSTER, PROJ_PHASE, 0);
+        break;
+    }
+
+    /* ---- T1: Technomancer ---- */
+    case SKILL_TURRET_DEPLOY: {
+        s16 dir = pe->facing ? -384 : 384;
+        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+        for (int i = 0; i < 6; i++) {
+            s16 vy = (s16)((i - 2) * 48);
+            s16 d = (s16)(dir * (75 + i * 5) / 100);
+            projectile_spawn(sx, pe->y + FP8(2 + i), d, vy,
+                             (s16)dmg, SUBTYPE_PROJ_BUSTER, 0, 0);
+        }
+        break;
+    }
+    case SKILL_SCAN_PULSE: {
+        s16 dir = pe->facing ? -512 : 512;
+        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+        for (int i = 0; i < 5; i++) {
+            s16 vy = (s16)((i - 2) * 32);
+            projectile_spawn(sx, pe->y + FP8(4), dir, vy,
+                             (s16)dmg, SUBTYPE_PROJ_BEAM, PROJ_PIERCE, 0);
+        }
+        break;
+    }
+
+    /* ---- T2/T3: Buff-type skills (use timer statics) ---- */
+    case SKILL_IRON_PROTOCOL:
+    case SKILL_WARCRY_PULSE:
+    case SKILL_OVERCLOCK_REFLEXES:
+    case SKILL_BLOOD_CIRCUIT:
+    case SKILL_LAST_STAND:
+    case SKILL_PAYLOAD_ROUNDS:
+    case SKILL_SHIELD_SIPHON:
+    case SKILL_WARPATH:
+        /* Generic buff — set overclock_timer as a catch-all */
+        overclock_timer = dur;
+        hud_notify(sd->name, 60);
+        if (pe) particle_burst(pe->x + FP8(6), pe->y + FP8(6), 3, PART_STAR, 160, 16);
+        break;
+
+    case SKILL_CHROME_RAGE:
+        berserk_timer = dur;
+        hud_notify("CHROME RAGE!", 60);
+        break;
+
+    case SKILL_PHASE_CLOAK:
+        smoke_timer = dur;
+        hud_notify("PHASE CLOAK!", 60);
+        break;
+
+    case SKILL_ADRENALINE_SURGE:
+        backstab_timer = dur;
+        hud_notify("ADRENALINE!", 60);
+        break;
+
+    case SKILL_REPAIR_PULSE:
+        nanobots_timer = dur;
+        nanobots_heal_tick = 0;
+        hud_notify("REPAIR!", 60);
+        break;
+
+    case SKILL_OVERCLOCK_PROTOCOL:
+        overclock_plus_timer = dur;
+        hud_notify("OVERCLOCK!", 60);
+        break;
+
+    /* ---- Projectile-type skills ---- */
+    case SKILL_TYPHOON_BURST:
+    case SKILL_SHOCKWAVE_SLAM:
+    case SKILL_CASCADE_FAILURE:
+    case SKILL_RICOCHET_SHOT:
+    case SKILL_SHURIKEN_BARRAGE: {
+        s16 dir = pe->facing ? -512 : 512;
+        s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
+                         (s16)dmg, SUBTYPE_PROJ_CHARGE, PROJ_PIERCE, 0);
+        if (pe) particle_burst(pe->x + FP8(6), pe->y + FP8(6), 4, PART_SPARK, 200, 12);
+        break;
+    }
+
+    /* ---- AoE-type skills ---- */
+    case SKILL_SEISMIC_STOMP:
+    case SKILL_SYNAPSE_BURN:
+    case SKILL_SYSTEM_CRASH:
+        enemy_stun_all(dmg);
+        video_shake(3, 1);
+        hud_notify(sd->name, 60);
+        break;
+
+    /* ---- Dash-type skills ---- */
+    case SKILL_CONCUSSIVE_CHARGE:
+    case SKILL_NERVE_STRIKE:
+    case SKILL_BLADE_STORM:
+    case SKILL_SHADOW_STRIKE: {
+        /* Simplified dash: teleport + damage */
+        s32 step = FP8(32);
+        s32 dest = pe->x + (pe->facing ? -step : step);
+        if (dest < 0) dest = 0;
+        int max_x2 = (NET_MAP_PX - pe->width) << 8;
+        if (dest > max_x2) dest = max_x2;
+        particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
+        pe->x = dest;
+        particle_spawn(pe->x + FP8(6), pe->y + FP8(6), 0, 0, PART_ELECTRIC, 12);
+        /* Damage nearby enemies */
+        enemy_stun_all(dmg);
+        break;
+    }
+
+    /* ---- Deploy-type skills ---- */
+    case SKILL_DECOY_HOLOGRAM:
+    case SKILL_TESLA_MINE:
+    case SKILL_SENTRY_NETWORK:
+    case SKILL_WIRE_TRAP:
+    case SKILL_SMOKE_CLOUD:
+    case SKILL_DRONE_SWARM:
+    case SKILL_BASTILLE_FIELD:
+    case SKILL_AEGIS_FIELD: {
+        /* Placeholder: spawn projectiles as deployable stand-in */
+        s16 dir = pe->facing ? -256 : 256;
+        s32 sx = pe->x + (pe->facing ? -FP8(8) : FP8(16));
+        projectile_spawn(sx, pe->y + FP8(4), dir, 0,
+                         (s16)dmg, SUBTYPE_PROJ_BUSTER, 0, 0);
+        hud_notify(sd->name, 60);
+        break;
+    }
+
+    /* ---- Debuff-type skills ---- */
+    case SKILL_CONTAGION:
+    case SKILL_MARKED_FOR_DEATH:
+    case SKILL_EXPLOIT:
+        upload_timer = dur;
+        hud_notify(sd->name, 60);
+        break;
+
+    /* ---- Special-type skills ---- */
+    case SKILL_FORTRESS_MODE:
+        iron_skin_timer = dur;
+        data_shield_timer = dur;
+        hud_notify("FORTRESS!", 60);
+        break;
+
+    case SKILL_PHASE_WALK:
+        smoke_timer = dur;
+        hud_notify("PHASE WALK!", 60);
+        break;
+
+    case SKILL_BULLET_TIME:
+        time_warp_timer = dur;
+        hud_notify("BULLET TIME!", 60);
+        break;
+
+    case SKILL_TEMPORAL_ANCHOR:
+    case SKILL_FEEDBACK_LOOP:
+    case SKILL_FLURRY:
+        /* Complex mechanics — placeholder as buff */
+        overclock_timer = dur;
+        hud_notify(sd->name, 60);
+        break;
+
+    default:
+        /* Fallback: spawn a projectile or apply a buff */
+        if (sd->type == STYPE_PROJECTILE || sd->type == STYPE_AOE) {
+            s16 dir = pe->facing ? -512 : 512;
+            s32 sx = pe->x + (pe->facing ? -FP8(4) : FP8(12));
+            projectile_spawn(sx, pe->y + FP8(4), dir, 0,
+                             (s16)dmg, SUBTYPE_PROJ_CHARGE, 0, 0);
+        } else {
+            overclock_timer = dur > 0 ? dur : 180;
+            hud_notify(sd->name, 60);
+        }
+        break;
+    }
+
+    return 1;
 }
