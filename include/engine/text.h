@@ -18,6 +18,10 @@ void text_init(void);
 /* Print a string at tile position (tx, ty) on BG0. */
 void text_print(int tx, int ty, const char* str);
 
+/* Print a string with word wrapping. max_w = columns available.
+ * Returns number of rows used. */
+int text_print_wrap(int tx, int ty, const char* str, int max_w);
+
 /* Clear a rectangular region on BG0. */
 void text_clear_rect(int tx, int ty, int w, int h);
 

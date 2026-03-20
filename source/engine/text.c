@@ -207,6 +207,52 @@ void text_print(int tx, int ty, const char* str) {
     }
 }
 
+/* Print a string with word wrapping at screen boundary.
+ * max_w = max columns available (typically 30 - tx).
+ * Wraps at word boundaries. Returns number of rows used. */
+int text_print_wrap(int tx, int ty, const char* str, int max_w) {
+    if (!text_ready || !str) return 0;
+    if (max_w <= 0) max_w = 30 - tx;
+    int start_x = tx;
+    int x = tx;
+    int rows = 1;
+    while (*str) {
+        if (*str == '\n') {
+            ty++;
+            x = start_x;
+            rows++;
+            str++;
+            continue;
+        }
+        /* Measure next word length */
+        int wlen = 0;
+        const char* wp = str;
+        while (*wp && *wp != ' ' && *wp != '\n') { wlen++; wp++; }
+        /* If word doesn't fit on current line and we're not at line start, wrap */
+        if (x != start_x && (x - start_x) + wlen > max_w) {
+            ty++;
+            x = start_x;
+            rows++;
+        }
+        /* Print the word */
+        for (int i = 0; i < wlen && x < 30 && ty < 20; i++) {
+            if (x >= 0 && ty >= 0) {
+                int ch = str[i] - ' ';
+                if (ch < 0 || ch >= FONT_CHAR_COUNT) ch = 0;
+                TEXT_MAP[ty * 32 + x] = (u16)(FONT_TILE_BASE + ch);
+            }
+            x++;
+        }
+        str += wlen;
+        /* Skip spaces (but print one if mid-line) */
+        if (*str == ' ') {
+            if (x < start_x + max_w) x++;
+            str++;
+        }
+    }
+    return rows;
+}
+
 /* Print a decimal number at tile position */
 void text_print_int(int tx, int ty, int value) {
     char buf[12];

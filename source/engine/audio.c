@@ -6,6 +6,7 @@ void audio_update(void) {}
 void audio_play_music(int module_id) { (void)module_id; }
 void audio_stop_music(void) {}
 void audio_play_sfx(int sfx_id) { (void)sfx_id; }
+void audio_play_sfx_vol(u16 sfx_id, u8 volume) { (void)sfx_id; (void)volume; }
 void audio_fade_music(int frames) { (void)frames; }
 void audio_update_fade(void) {}
 void audio_set_intensity(int level) { (void)level; }
@@ -463,9 +464,19 @@ void audio_play_music(int module_id) {
 
 void audio_stop_music(void) { mmStop(); }
 
-void audio_play_sfx(int sfx_id) {
+void audio_play_sfx_vol(u16 sfx_id, u8 volume) {
     if (sfx_id <= SFX_NONE || sfx_id >= SFX_COUNT) return;
-    mm_sfxhand h = mmEffect((mm_word)sfx_map[sfx_id]); (void)h;
+    mm_sound_effect snd;
+    snd.id      = (mm_word)sfx_map[sfx_id];
+    snd.rate    = 1024;     /* 1.0 = normal playback rate (6.10 fixed) */
+    snd.handle  = 0;
+    snd.volume  = volume;
+    snd.panning = 128;      /* center */
+    mm_sfxhand h = mmEffectEx(&snd); (void)h;
+}
+
+void audio_play_sfx(int sfx_id) {
+    audio_play_sfx_vol((u16)sfx_id, VOL_SFX_NORMAL);
 }
 
 void audio_set_intensity(int level) {

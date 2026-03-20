@@ -44,7 +44,7 @@ static const char* const acc_type_names[ACC_TYPE_COUNT] = {
 };
 
 static const char* const rarity_names[RARITY_COUNT] = {
-    "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic",
+    "C", "B", "A", "A+", "S", "S+",
 };
 
 /* Rarity roll weights (cumulative out of 100) */

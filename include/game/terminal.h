@@ -10,20 +10,24 @@
  * Typewriter text effect, cursor navigation.
  */
 
-/* Terminal menu items */
+/* Terminal menu items — 8 options in 3 groups */
 enum {
     TMENU_CONTRACTS = 0,
+    TMENU_JACK_IN,
+    TMENU_BUGBOUNTY_OPT,
     TMENU_SHOP,
     TMENU_INVENTORY,
-    TMENU_STATS,
-    TMENU_SKILLS,
-    TMENU_CODEX,
     TMENU_CRAFT,
-    TMENU_JACK_IN,
+    TMENU_SKILLS,
     TMENU_SAVE,
-    TMENU_HELP,
+    TMENU_STATS_CODEX,
     TMENU_COUNT
 };
+
+/* Group header rows (non-selectable) */
+#define TMENU_GRP_OPS    0  /* OPERATIONS group */
+#define TMENU_GRP_SYS    1  /* SYSTEMS group */
+#define TMENU_GRP_DATA   2  /* DATA group */
 
 /* Terminal palette banks (BG0) */
 #define TPAL_GREEN   0   /* Green text on black */
@@ -36,6 +40,9 @@ void terminal_init_palette(void);
 
 /* Draw the main terminal menu with cursor (blinking cursor effect). */
 void terminal_draw_menu(int cursor);
+
+/* Get the screen row for a menu item index (for grouped layout). */
+int terminal_menu_item_row(int idx);
 
 /* Draw a typewriter-style text line.
  * Returns 1 when done typing. */
@@ -62,5 +69,16 @@ void terminal_load_bg(void);
 
 /* Update BG1 scroll for animated circuit board effect. Call each frame. */
 void terminal_scroll_bg(void);
+
+/* Draw a bordered panel (ASCII box) filling the rectangle.
+ * Corners '+', horizontal '-', vertical '|', interior filled with spaces.
+ * top/left/bottom/right are tile-grid coordinates (0-19 rows, 0-29 cols). */
+void terminal_draw_panel(int top, int left, int bottom, int right);
+
+/* Enable overlay dimming: darkens BG1+BG2 behind BG0 text via alpha blend. */
+void terminal_overlay_on(void);
+
+/* Disable overlay dimming: clears blend registers. */
+void terminal_overlay_off(void);
 
 #endif /* GAME_TERMINAL_H */

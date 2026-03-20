@@ -395,9 +395,9 @@ void state_net_enter(void) {
 static void update_play(void) {
     /* Pause check */
     if (input_hit(KEY_START)) {
-        /* Force-close ability wheel before pausing */
-        if (player_state.ability_wheel_open) {
-            player_state.ability_wheel_open = 0;
+        /* Force-close skill wheel before pausing */
+        if (player_state.skill_wheel_open) {
+            player_state.skill_wheel_open = 0;
             REG_BLDCNT = 0;
             REG_BLDY = 0;
         }
@@ -411,11 +411,11 @@ static void update_play(void) {
     /* Player update (always runs — handles ability wheel input too) */
     player_update();
 
-    /* While ability wheel is open, pause everything else (unless dead) */
-    if (player_ability_wheel_is_open()) {
+    /* While skill wheel is open, pause everything else (unless dead) */
+    if (player_state.skill_wheel_open) {
         if (player_is_alive()) return;
         /* Force-close wheel on death */
-        player_state.ability_wheel_open = 0;
+        player_state.skill_wheel_open = 0;
     }
 
     /* Check for death — SFX_PLAYER_DIE + shake already fired in player_take_damage */

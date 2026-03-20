@@ -18,6 +18,7 @@
 #include "game/bugbounty.h"
 #include "game/hud.h"
 #include "game/particle.h"
+#include "game/shop.h"
 #include "game/abilities.h"
 #include "game/quest.h"
 #include "game/loot.h"
@@ -1399,8 +1400,7 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
                 /* Critical hit check: base 5% + LCK/2% + skill tree crit bonus */
                 {
                     int crit_chance = 5 + player_state.lck / 2;
-                    /* Skill tree: offense branch index 0 = crit chance (+3/6/9%) */
-                    crit_chance += player_state.skill_tree[0] * 3;
+                    /* Old skill_tree crit bonus removed — crit from equipment only */
                     /* Crit Lens accessory bonus */
                     {
                         LootItem* crit_acc = inventory_get_equipped_accessory();
@@ -1462,6 +1462,46 @@ IWRAM_CODE int enemy_check_player_attack(Entity* player) {
             }
         }
     }
+
+    /* Charge Rush contact damage (Assault: PSTATE_CHARGE body-vs-enemy AABB).
+     * Uses last_hit_id with a per-activation generation counter for dedup. */
+    if (player_state.state == PSTATE_CHARGE && player_state.charge_rush_timer > 0) {
+        static u16 charge_gen = 1;
+        static u8 last_charge_timer = 0;
+        /* Detect new charge activation (timer just started) */
+        if (player_state.charge_rush_timer > last_charge_timer) charge_gen++;
+        last_charge_timer = player_state.charge_rush_timer;
+
+        int ppx = (int)(player->x >> 8);
+        int ppy = (int)(player->y >> 8);
+        int pw = (int)player->width;
+        int ph = (int)player->height;
+        int charge_dmg = player_charge_rush_damage();
+
+        for (int i = 0; i < hw; i++) {
+            Entity* e = entity_get(i);
+            if (!e || e->type != ENT_ENEMY || e->hp <= 0) continue;
+            if (e->last_hit_id == charge_gen) continue; /* Already hit this charge */
+            int ex = (int)(e->x >> 8);
+            int ey = (int)(e->y >> 8);
+            /* AABB overlap check */
+            if (ppx + pw > ex && ppx < ex + (int)e->width &&
+                ppy + ph > ey && ppy < ey + (int)e->height) {
+                e->last_hit_id = charge_gen;
+                enemy_damage(e, charge_dmg);
+                hud_floattext_spawn(e->x, e->y - FP8(4), charge_dmg, 0);
+                /* Knockback away from player */
+                s16 kb = (player->x < e->x) ? 128 : -128;
+                if (e->subtype == ENEMY_TURRET || e->subtype == ENEMY_SENTRY || e->subtype == ENEMY_SPIKE) {
+                    kb = (s16)(kb / 4); e->vy = 0;
+                }
+                e->vx = kb;
+                particle_spawn(e->x + FP8(4), e->y + FP8(4), 0, -64, PART_SPARK, 10);
+                total_dmg += charge_dmg;
+            }
+        }
+    }
+
     return total_dmg;
 }
 
@@ -1567,11 +1607,10 @@ void enemy_damage(Entity* e, int dmg) {
                     if (cr_acc && LOOT_SUBTYPE(cr_acc->type) == ACC_CREDIT_FINDER)
                         cr += cr_acc->stat1;
                 }
-                /* Skill tree: utility branch index 3 = credits bonus (+5/10/15%) */
-                int cr_bonus = player_state.skill_tree[11] * 5;
-                if (cr_bonus > 0) cr = cr * (100 + cr_bonus) / 100;
-                u32 total = (u32)player_state.credits + (u32)cr;
-                player_state.credits = (total > 0xFFFF) ? (u16)0xFFFF : (u16)total;
+                /* Charge-based credit finder buff: +15% */
+                if (shop_buff_active(CHARGE_CREDIT_FINDER))
+                    cr = cr * 115 / 100;
+                player_state.credits += (u32)cr;
             }
 
             /* Bug bounty scoring */

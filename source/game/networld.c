@@ -721,6 +721,10 @@ void networld_stream_columns(int cam_px) {
         last_streamed_left = left_col;
 }
 
+void networld_refresh_column(int level_col) {
+    write_column_to_vram(level_col);
+}
+
 void networld_load_parallax(u16 seed, int act) {
     if (act < 0 || act > 5) act = 0;
 

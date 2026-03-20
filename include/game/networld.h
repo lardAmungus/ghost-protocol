@@ -21,6 +21,9 @@ void networld_stream_columns(int cam_px);
 /* Force-load all visible columns (call on level entry). */
 void networld_load_visible(int cam_px);
 
+/* Re-write a single column to VRAM (for runtime tile changes like breakable walls). */
+void networld_refresh_column(int level_col);
+
 /* Load the parallax BG for Net levels. Seed varies skyline pattern.
  * act: 0=freelance, 1-5=story act for themed palette. */
 void networld_load_parallax(u16 seed, int act);

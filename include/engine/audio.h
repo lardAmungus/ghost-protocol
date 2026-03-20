@@ -98,11 +98,18 @@ enum {
     SFX_COUNT                      = 381
 };
 
+/* SFX volume categories (0-255 scale for mmEffectEx) */
+#define VOL_SFX_LOUD     150   /* weapons, explosions */
+#define VOL_SFX_NORMAL   200   /* combat, movement */
+#define VOL_SFX_QUIET    230   /* UI, ambient */
+#define VOL_SFX_SUBTLE   100   /* footsteps, particles */
+
 void audio_init(void);
 void audio_update(void);
 void audio_play_music(int module_id);
 void audio_stop_music(void);
 void audio_play_sfx(int sfx_id);
+void audio_play_sfx_vol(u16 sfx_id, u8 volume);
 void audio_fade_music(int frames);
 void audio_update_fade(void);
 /* Set combat intensity: 0=normal, 1=medium, 2=high — adjusts tempo */

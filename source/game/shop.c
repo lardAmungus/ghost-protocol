@@ -13,10 +13,10 @@
 static const ShopItem shop_items[SHOP_ITEM_COUNT] = {
     { "Health Pack",    15 },   /* Restore 20 HP — instant */
     { "CD Reset",       40 },   /* Reset skill cooldown — instant */
-    { "XP Booster",     30 },   /* +15% XP gain — charge-based */
-    { "Shield Charge",  25 },   /* +5 DEF — charge-based */
-    { "Credit Finder",  35 },   /* +15% credit drops — charge-based */
-    { "Loot Magnet",    45 },   /* Increased rare drops — charge-based */
+    { "XP Booster",     60 },   /* +15% XP gain — charge-based */
+    { "Shield Chg",     25 },   /* +5 DEF — charge-based */
+    { "Credit Find",    50 },   /* +15% credit drops — charge-based */
+    { "Loot Magnet",    50 },   /* Increased rare drops — charge-based */
 };
 
 static u8 purchase_count[SHOP_ITEM_COUNT];

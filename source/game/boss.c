@@ -12,6 +12,7 @@
 #include "game/hud.h"
 #include "game/player.h"
 #include "game/itemdrop.h"
+#include "game/shop.h"
 #include "engine/sprite.h"
 #include "engine/entity.h"
 #include "engine/collision.h"
@@ -385,17 +386,14 @@ void boss_spawn(int boss_type, int tier) {
     e->hp = boss_state.hp;
     e->facing = 1;
 
-    /* Place boss in boss arena center.
-     * Boss arena is always the last section, floor at y=28.
-     * Use exit-relative positioning when valid, fall back to known arena coords. */
+    /* Place boss at level_data.boss_tile_x/y (set by levelgen) */
     {
-        int bx_tile = (int)level_data.exit_x - 4; /* 4 left of exit = arena center */
-        int by_tile = (int)level_data.exit_y - 2; /* 2 above exit = standing height */
-        /* Validate: boss arena starts at tile (NUM_SECTIONS-1)*16 */
-        int arena_start = (NUM_SECTIONS - 1) * 16;
-        int arena_end = arena_start + 11;
-        if (bx_tile < arena_start || bx_tile > arena_end) bx_tile = arena_start + 8;
-        if (by_tile < 4  || by_tile > 26)   by_tile = 25;
+        int bx_tile = (int)level_data.boss_tile_x;
+        int by_tile = (int)level_data.boss_tile_y;
+        if (bx_tile < 4 || bx_tile > NET_MAP_W - 4)
+            bx_tile = NET_MAP_W / 2;
+        if (by_tile < 4 || by_tile > 28)
+            by_tile = 25;
         e->x = (s32)bx_tile * 8 * 256;
         e->y = (s32)by_tile * 8 * 256;
     }
@@ -485,7 +483,7 @@ static void attack_blackout(Entity* e, s32 player_x, s32 player_y, int enraged) 
 
     /* ATTACK1: Teleport to random position + aimed shot */
     if (boss_state.phase == BPHASE_ATTACK1) {
-        /* Arena bounds for teleport clamping (last 25% of map) */
+        /* Arena bounds for teleport clamping (boss section) */
         int arena_min_x = (NET_MAP_W * 3 / 4) * 8 * 256;
         int arena_max_x = (NET_MAP_W * 8 - e->width) * 256;
         if (boss_state.phase_timer == 10) {
@@ -773,7 +771,7 @@ static void attack_daemon(Entity* e, s32 player_x, s32 player_y, int enraged) {
     }
     /* ATTACK2: Teleport + charge combo. Faster per stage */
     if (boss_state.phase == BPHASE_ATTACK2) {
-        /* Arena bounds for teleport clamping (last 25% of map) */
+        /* Arena bounds for teleport clamping (boss section) */
         int arena_min_x = (NET_MAP_W * 3 / 4) * 8 * 256;
         int arena_max_x = (NET_MAP_W * 8 - e->width) * 256;
         if (boss_state.phase_timer == 5) {
@@ -1068,10 +1066,10 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
             e->on_ground = (u8)collision_check_ground(px, py + e->height - 1, e->width);
         }
 
-        /* Arena bounds — confine boss to last section (tiles 240-255) */
+        /* Boss movement bounds — world borders only (open-world, no arena) */
         {
-            int arena_min_x = (NUM_SECTIONS - 1) * 16 * 8 * 256; /* tile 240 */
-            int arena_max_x = (NET_MAP_W * 8 - e->width) * 256;
+            int arena_min_x = 1 * 8 * 256;
+            int arena_max_x = (NET_MAP_W - 2) * 8 * 256 - e->width * 256;
             int arena_max_y = (NET_MAP_H * 8 - e->height) * 256;
             if (e->x < arena_min_x) { e->x = arena_min_x; e->vx = 0; }
             if (e->x > arena_max_x) { e->x = arena_max_x; e->vx = 0; }
@@ -1252,7 +1250,7 @@ IWRAM_CODE int boss_check_player_attack(Entity* player) {
             int is_crit = 0;
             {
                 int crit_chance = 5 + player_state.lck / 2;
-                crit_chance += player_state.skill_tree[0] * 3;
+                /* Old skill_tree crit bonus removed — crit from equipment only */
                 LootItem* crit_acc = inventory_get_equipped_accessory();
                 if (crit_acc && LOOT_SUBTYPE(crit_acc->type) == ACC_CRIT_LENS)
                     crit_chance += crit_acc->stat1;
@@ -1289,11 +1287,37 @@ IWRAM_CODE int boss_check_player_attack(Entity* player) {
             }
         }
     }
+
+    /* Charge Rush contact damage (Assault) — player body vs boss AABB */
+    if (player_state.state == PSTATE_CHARGE && player_state.charge_rush_timer > 0 &&
+        boss_entity->last_hit_id != 0xFFFE) {
+        int ppx = (int)(player->x >> 8);
+        int ppy = (int)(player->y >> 8);
+        int pw = (int)player->width;
+        int ph = (int)player->height;
+        int bx = (int)(boss_entity->x >> 8);
+        int by = (int)(boss_entity->y >> 8);
+        if (ppx + pw > bx && ppx < bx + (int)boss_entity->width &&
+            ppy + ph > by && ppy < by + (int)boss_entity->height) {
+            int charge_dmg = player_charge_rush_damage();
+            if (boss_state.phase == BPHASE_VULNERABLE) charge_dmg *= 2;
+            boss_entity->last_hit_id = 0xFFFE; /* Dedup: one hit per charge */
+            boss_damage(charge_dmg);
+            total_dmg += charge_dmg;
+            particle_burst(boss_entity->x + FP8(8), boss_entity->y + FP8(8),
+                           4, PART_SPARK, 200, 12);
+        }
+    } else if (player_state.state != PSTATE_CHARGE) {
+        /* Clear dedup flag when not charging */
+        if (boss_entity) boss_entity->last_hit_id = 0;
+    }
+
     return total_dmg;
 }
 
 void boss_damage(int dmg) {
     if (boss_state.phase == BPHASE_DEAD) return;
+    if (boss_state.phase == BPHASE_TRANSITION) return; /* Immune during stage transition */
     /* Damage resistance outside vulnerability window:
      * IDLE/ATTACK phases take 50% damage to reward hitting during vulnerability */
     int actual = dmg;
@@ -1353,12 +1377,11 @@ void boss_damage(int dmg) {
         /* Award credits: 50 base + 30 per boss type */
         {
             int creds = 50 + boss_state.type * 30;
-            /* Skill tree: utility branch index 3 = credits bonus (+5/10/15%) */
-            int cr_bonus = player_state.skill_tree[11] * 5;
-            if (cr_bonus > 0) creds = creds * (100 + cr_bonus) / 100;
+            /* Charge-based credit finder buff: +15% */
+            if (shop_buff_active(CHARGE_CREDIT_FINDER))
+                creds = creds * 115 / 100;
             {
-                u32 total = (u32)player_state.credits + (u32)creds;
-                player_state.credits = (total > 0xFFFF) ? (u16)0xFFFF : (u16)total;
+                player_state.credits += (u32)creds;
             }
         }
 

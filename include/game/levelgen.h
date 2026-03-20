@@ -8,12 +8,14 @@
  * Ghost Protocol — Procedural Level Generator
  *
  * Generates side-scrolling Net levels from seed + tier.
- * 256x32 tiles (2048x256 px), divided into 16 sections.
+ * Variable width 12-16 sections (max 256x32 tiles).
  */
 
-#define NUM_SECTIONS 16
+#define NUM_SECTIONS     16   /* Maximum sections (array size / external compat) */
+#define MIN_SECTIONS     12
+#define MAX_SECTIONS     16
 
-/* Section types */
+/* Section types (lower 4 bits of sections[] entry) */
 enum {
     SECT_FLAT = 0,       /* Corridor */
     SECT_PLATFORMS,      /* Elevated with gaps */
@@ -29,8 +31,30 @@ enum {
     SECT_CACHE,          /* Hidden loot room */
     SECT_NETWORK,        /* Multi-layer connected paths */
     SECT_GAUNTLET,       /* Dense enemy combat */
+    /* Mega-section types */
+    SECT_MEGA_ARENA,     /* 32-tile wide, 3 floor levels, walled */
+    SECT_MEGA_TRANSIT,   /* 32-tile wide, alternating platforms + reward */
+    SECT_MEGA_CONT,      /* Continuation of mega-section (skip generation) */
     SECT_TYPE_COUNT
 };
+
+/* Section modifiers (stored in upper 4 bits of sections[]) */
+enum {
+    MOD_NONE     = 0,
+    MOD_FLOODED  = 1,   /* Bottom 4 rows hazard, platforms raised */
+    MOD_DARK     = 2,   /* 60% decoration replaced with dark fill */
+    MOD_OVERGROWN = 3,  /* Corruption spread from wall seeds */
+    MOD_UNSTABLE = 4,   /* 30% platforms become breakable */
+    MOD_COUNT
+};
+
+#define SECT_TYPE_MASK  0x0F
+#define SECT_MOD_SHIFT  4
+#define SECT_MOD_MASK   0xF0
+
+/* Extract section type and modifier */
+#define SECT_GET_TYPE(s)  ((s) & SECT_TYPE_MASK)
+#define SECT_GET_MOD(s)   (((s) & SECT_MOD_MASK) >> SECT_MOD_SHIFT)
 
 /* Net tile visual types (for BG1 rendering) */
 enum {
@@ -97,24 +121,50 @@ enum {
     NTILE_EXIT_FRAME,         /* 53: exit gate frame */
     NTILE_EXIT_GATE,          /* 54: exit gate glow */
     NTILE_SPAWN,              /* 55: enemy spawn marker */
-    NTILE_COUNT               /* 56 total tiles */
+    /* Act-themed decorations (56-73) */
+    NTILE_DECO_FLICKER,       /* 56: flickering light */
+    NTILE_DECO_TERMINAL,      /* 57: inactive terminal */
+    NTILE_DECO_DUCT,          /* 58: ventilation duct */
+    NTILE_DECO_GRIME,         /* 59: grimy surface */
+    NTILE_DECO_MOSS,          /* 60: digital moss/corruption */
+    NTILE_DECO_RUST,          /* 61: rusted panel */
+    NTILE_DECO_SLUDGE,        /* 62: toxic sludge drip */
+    NTILE_DECO_WARNING,       /* 63: warning stripe */
+    NTILE_DECO_BLAST,         /* 64: blast mark */
+    NTILE_DECO_GRID,          /* 65: holographic grid */
+    NTILE_DECO_VOID,          /* 66: void pixel */
+    NTILE_DECO_ARC,           /* 67: electric arc */
+    NTILE_DECO_PULSE,         /* 68: power pulse */
+    NTILE_DECO_CORE,          /* 69: core fragment */
+    NTILE_DECO_DIVIDER,       /* 70: path divider wall */
+    NTILE_DECO_MEGA_WALL,     /* 71: mega-section reinforced wall */
+    NTILE_DECO_REWARD,        /* 72: reward marker */
+    NTILE_DECO_DARK,          /* 73: dark fill tile */
+    NTILE_COUNT               /* 74 total tiles */
 };
 
 /* Level data (generated, not stored in save) */
 typedef struct {
     u8 tiles[NET_MAP_W * NET_MAP_H];   /* Visual tile map */
     u8 collision[NET_MAP_W * NET_MAP_H]; /* Collision map (TILE_* values) */
-    u8 sections[NUM_SECTIONS]; /* Section type per 16-column chunk */
     u16 seed;
     u8 tier;
-    u8 is_boss_level;   /* 1 if last section is SECT_BOSS */
+    u8 is_boss_level;
     u8 spawn_x, spawn_y; /* Player start position (tiles) */
     u8 exit_x, exit_y;   /* Exit gate position (tiles) */
+    u8 boss_tile_x, boss_tile_y; /* Boss spawn position (tiles) */
     u8 num_spawns;       /* Number of enemy spawn points */
     u8 spawn_points[48][2]; /* Enemy spawn positions (tile x,y) */
 } LevelData;
 
 extern LevelData level_data;
+
+/* Per-act BG palette themes (16 colors each, palette bank 1) */
+extern const u16 act_bg_palettes[6][16];
+
+/* Per-act parallax tile data (up to 8 tiles = 64 bytes each) */
+extern const u32 act_parallax_tiles[6][64]; /* 8 tiles x 8 words per tile */
+extern const int act_parallax_tile_count[6]; /* Number of unique tiles per act */
 
 /* Generate a level from seed and tier. */
 void levelgen_generate(u16 seed, int tier, int is_boss);

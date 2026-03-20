@@ -7,16 +7,15 @@
 #include <string.h>
 
 static const char* const menu_labels[TMENU_COUNT] = {
-    "CONTRACTS",
-    "SHOP",
-    "INVENTORY",
-    "STATS",
-    "SKILLS",
-    "CODEX",
-    "CRAFT",
-    "JACK IN",
-    "SAVE/LOAD",
-    "HELP/TIPS",
+    "Contracts",
+    "Jack In",
+    "Bug Bounty",
+    "Shop",
+    "Inventory",
+    "Craft",
+    "Skills",
+    "Save/Load",
+    "Stats & Codex",
 };
 
 static int frame_counter;
@@ -39,26 +38,39 @@ void terminal_init_palette(void) {
     pal_bg_mem[3 * 16 + 1] = RGB15(28, 8, 6);
 }
 
+int terminal_menu_item_row(int idx) {
+    /* OPERATIONS group (rows 6-8): Contracts, Jack In, Bug Bounty */
+    if (idx <= 2) return 6 + idx;
+    /* SYSTEMS group (rows 11-14): Shop, Inventory, Craft, Skills */
+    if (idx <= 6) return 11 + (idx - 3);
+    /* DATA group (rows 17-18): Save/Load, Stats & Codex */
+    return 17 + (idx - 7);
+}
+
 void terminal_draw_menu(int cursor) {
     terminal_print_pal(2, 1, "GHOST PROTOCOL v1.0", TPAL_AMBER);
-    text_print(2, 2, "-------------------");
+
+    /* Group headers */
+    terminal_print_pal(2, 5, "OPERATIONS", TPAL_AMBER);
+    terminal_print_pal(2, 10, "SYSTEMS", TPAL_CYAN);
+    terminal_print_pal(2, 16, "DATA", TPAL_GREEN);
 
     for (int i = 0; i < TMENU_COUNT; i++) {
-        int row = 4 + i;
+        int row = terminal_menu_item_row(i);
         if (i == cursor) {
-            /* Blinking cursor: visible 12 frames, hidden 4 frames (16-frame cycle) */
             if ((frame_counter & 15) >= 12) {
-                text_print(3, row, " ");
+                text_put_char(3, row, ' ');
             } else {
-                text_print(3, row, ">");
+                text_put_char(3, row, '>');
             }
         } else {
-            text_print(3, row, " ");
+            text_put_char(3, row, ' ');
         }
         text_print(5, row, menu_labels[i]);
     }
 
-    text_print(2, 18, "A:Select  B:Back");
+    /* Nav hints at row 19 alongside status */
+    text_print(24, 19, "SEL:?");
 }
 
 int terminal_typewriter(int tx, int ty, const char* text, int* char_pos, int* timer) {
@@ -195,4 +207,44 @@ void terminal_scroll_bg(void) {
     /* Slow diagonal scroll — 1px every 2 frames horizontal, 1px every 4 frames vertical */
     REG_BG1HOFS = (u16)(frame_counter >> 1);
     REG_BG1VOFS = (u16)(frame_counter >> 2);
+}
+
+void terminal_draw_panel(int top, int left, int bottom, int right) {
+    if (top >= bottom || left >= right) return;
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom > 19) bottom = 19;
+    if (right > 29) right = 29;
+
+    /* Corners */
+    text_put_char(left, top, '+');
+    text_put_char(right, top, '+');
+    text_put_char(left, bottom, '+');
+    text_put_char(right, bottom, '+');
+
+    /* Top and bottom edges */
+    for (int c = left + 1; c < right; c++) {
+        text_put_char(c, top, '-');
+        text_put_char(c, bottom, '-');
+    }
+
+    /* Left and right edges + interior fill */
+    for (int r = top + 1; r < bottom; r++) {
+        text_put_char(left, r, '|');
+        text_put_char(right, r, '|');
+        for (int c = left + 1; c < right; c++) {
+            text_put_char(c, r, ' ');
+        }
+    }
+}
+
+void terminal_overlay_on(void) {
+    /* Brightness decrease on BG1+BG2 — dims background behind BG0 text */
+    REG_BLDCNT = BLD_BLACK | BLD_BG1 | BLD_BG2;
+    REG_BLDY = 10; /* Moderate dimming (0-16 scale) */
+}
+
+void terminal_overlay_off(void) {
+    REG_BLDCNT = 0;
+    REG_BLDY = 0;
 }

@@ -132,10 +132,10 @@ void hud_draw(void) {
                 if (player_state.skill_cooldown > 0) {
                     int rank = player_state.skill_ranks[player_state.slotted_skill];
                     int max_cd = skill_get_cooldown(sid, rank);
-                    int filled = (max_cd > 0) ? (player_state.skill_cooldown * 6 / max_cd) : 0;
-                    if (filled > 6) filled = 6;
+                    int cd_filled = (max_cd > 0) ? (player_state.skill_cooldown * 6 / max_cd) : 0;
+                    if (cd_filled > 6) cd_filled = 6;
                     for (int i = 0; i < 6; i++)
-                        text_put_char(11 + i, 1, (i < 6 - filled) ? '=' : '-');
+                        text_put_char(11 + i, 1, (i < 6 - cd_filled) ? '=' : '-');
                 } else {
                     text_print(11, 1, ":RDY");
                 }
@@ -144,7 +144,7 @@ void hud_draw(void) {
     }
 
     /* XP progress bar (cols 16-19 on row 1) */
-    if (player_state.level < MAX_LEVEL) {
+    if (player_state.level < MAX_LEVEL_ENDGAME) {
         int xp_need = player_xp_to_next();
         int xp_pct = (xp_need > 0) ? (int)player_state.xp * 100 / xp_need : 0;
         int xp_fill = (xp_need > 0) ? (int)player_state.xp * 4 / xp_need : 0;
