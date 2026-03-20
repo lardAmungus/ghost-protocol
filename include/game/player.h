@@ -4,6 +4,7 @@
 #include <tonc.h>
 #include "engine/entity.h"
 #include "game/common.h"
+#include "game/skills.h"
 #include "game/physics.h"
 
 /* ---- Player state machine ---- */
@@ -17,30 +18,13 @@ enum {
     PSTATE_SHOOT,
     PSTATE_HIT,
     PSTATE_DEAD,
-    PSTATE_CHARGE,       /* Assault charge rush */
-    PSTATE_TETHER,       /* Technomancer tether pull */
-    PSTATE_TETHER_HOLD,  /* Technomancer tether wall hold */
+    PSTATE_CHARGE,       /* Charge rush (Trojan tier skill) */
+    PSTATE_TETHER,       /* Tether (Technomancer tier skill) */
+    PSTATE_TETHER_HOLD,  /* Tether (Technomancer tier skill) */
 };
 
-/* ---- Ability bitmask flags ---- */
-#define ABILITY_1  (1 << 0)  /* Unlocked at level 3 */
-#define ABILITY_2  (1 << 1)  /* Unlocked at level 5 */
-#define ABILITY_3  (1 << 2)  /* Unlocked at level 8 */
-#define ABILITY_4  (1 << 3)  /* Unlocked at level 10 */
-#define ABILITY_5  (1 << 4)  /* Unlocked at level 14 */
-#define ABILITY_6  (1 << 5)  /* Unlocked at level 18 */
-#define ABILITY_7  (1 << 6)  /* Unlocked at level 22 */
-#define ABILITY_8  (1 << 7)  /* Unlocked at level 26 */
-
-/* ---- Skill tree ---- */
-#define SKILL_BRANCHES   3   /* Offense, Defense, Utility */
-#define SKILLS_PER_BRANCH 4
-#define SKILL_TREE_SIZE  12  /* 3 branches x 4 skills */
-#define SKILL_MAX_RANK    3  /* Each skill has ranks 0-3 */
-#define SKILL_POINTS_PER_2_LEVELS 1  /* 1 SP per 2 levels */
-
 /* ---- XP curve ---- */
-#define MAX_LEVEL 40
+/* MAX_LEVEL_BASE and MAX_LEVEL_ENDGAME defined in common.h */
 #define BASE_XP   90  /* Linear: BASE_XP * level */
 
 /* ---- Player stats ----
@@ -60,8 +44,8 @@ enum {
  */
 typedef struct {
     /* === PERSISTENT (never zeroed after character creation) === */
-    u8  player_class;     /* CLASS_TROJAN / INFILTRATOR / TECHNOMANCER */
-    u8  evolution;        /* 0=none, or legacy evolution value (replaced by tier system) */
+    u8  player_class;     /* CLASS_TROJAN / INFILTRATOR / TECHNOMANCER (0xFF = classless) */
+    u8  tier_choices[3];  /* [0]=T1 class, [1]=T2 SPEC_*, [2]=T3 SPEC3_* (0xFF=unchosen) */
     u16 level;            /* 1-40+ (widened from u8 for NG+ levels) */
     u32 xp;              /* Current XP (widened from u16 for endgame) */
     /* INTEGRATION NOTE: xp widened to u32 — other files assigning to u16 SaveData fields
@@ -73,15 +57,15 @@ typedef struct {
     s16 def;
     s16 spd;
     s16 lck;
-    u8  skill_tree[SKILL_TREE_SIZE]; /* Skill ranks (0-3 per skill) */
-    u8  skill_points;     /* Unspent skill points */
-    u8  ability_unlocks;  /* Bitmask of ABILITY_1..8 */
-    u8  evolution_pending; /* 1 if evolution choice available but not yet made */
+    u8  skill_ranks[MAX_PLAYER_SKILLS]; /* Rank 0-10 per unlocked skill */
+    u8  skill_points;     /* Unspent skill points (1/level, banked pre-T1) */
+    u8  slotted_skill;    /* Index into unlocked skills array (which skill R fires, 0xFF=none) */
+    u8  suit_color;       /* 0-23 palette preset */
+    u8  visor_color;      /* 0-23 palette preset */
     u8  save_slot;        /* Active save slot */
     u16 craft_shards;     /* Crafting currency */
     u8  armor_flags;       /* Active armor passive bitflags */
     u8  armor_regen_timer; /* Frames until next regen tick */
-    u8  last_used_ability; /* Assigned ability for R button (persistent) */
     /* === LEVEL-SCOPE (zeroed on every level entry via player_init_level) === */
     u8  _level_scope_start; /* Marker: everything from here down gets zeroed */
     s32 last_safe_x;       /* Last safe ground position (8.8 FP) — level-scope */
@@ -99,8 +83,10 @@ typedef struct {
     u8  shoot_cooldown;    /* Frames until next shot */
     u8  charge_timer;      /* Charged shot timer (Assault) */
     u8  invincible_timer;  /* Iframes after hit */
-    u8  selected_ability;  /* Currently selected ability slot (0-7) */
-    u16 cooldown_ability[8]; /* Ability cooldown timers */
+    /* Skill system */
+    u16 skill_cooldown;       /* Cooldown frames remaining for slotted skill */
+    u8  skill_wheel_open;     /* 1=skill wheel overlay active */
+    u8  skill_wheel_cursor;   /* Cursor position in wheel */
     u16 overclock_timer;
     u16 iron_skin_timer;
     u16 berserk_timer;
@@ -126,10 +112,6 @@ typedef struct {
     /* Infiltrator: Dash (moved from old locations) */
     u8  dash_timer;        /* Frames remaining in dash */
     u8  dash_cooldown;     /* Cooldown frames remaining */
-    /* Ability wheel */
-    u8  ability_wheel_open;
-    u8  ability_wheel_slot;
-    u8  ability_wheel_page;
 } PlayerState;
 
 #define AFLAG_HAZARD_RESIST  (1 << 0)
@@ -175,30 +157,20 @@ int player_is_alive(void);
 /* Get base stat values per class per level */
 void player_get_base_stats(int cls, int lvl, s16* hp, s16* atk, s16* def, s16* spd, s16* lck);
 
-/* Get total skill points earned at given level */
-int player_skill_points_earned(int level);
-
-/* Try to allocate a skill point into skill_tree[index]. Returns 1 on success. */
-int player_skill_allocate(int index);
-
-/* Get passive bonus from skill tree for a given stat.
- * branch: 0=offense, 1=defense, 2=utility */
-int player_get_skill_bonus(int branch, int skill_idx);
-
 /* Recompute all stats from base + equipment + skills. Call after equip changes. */
 void player_recompute_stats(void);
 
-/* Apply evolution choice (1 or 2 for the class). Returns 1 on success. */
-int player_apply_evolution(int choice);
+/* Check if player has chosen T1 class yet. */
+int player_has_class(void);
 
-/* Get evolution name string for the player's current evolution. */
-const char* player_get_evolution_name(void);
+/* Get number of unlocked skills for current build path. */
+int player_get_skill_count(void);
 
-/* INTEGRATION NOTE: Stream 3 (HUD) should call these to render the ability wheel overlay.
- * These return the ability wheel state for HUD rendering. */
-u8 player_ability_wheel_is_open(void);
-u8 player_ability_wheel_slot(void);
-u8 player_ability_wheel_page(void);
+/* Get the skill ID at position idx in the player's unlocked skill list. */
+int player_get_skill_id(int idx);
+
+/* Get the player's current tier name string. */
+const char* player_get_tier_name(void);
 
 /* INTEGRATION NOTE: Stream 2 (enemy.c) should call this during Charge Rush (PSTATE_CHARGE)
  * to apply contact damage to enemies hit by the charge. Returns damage dealt. */
