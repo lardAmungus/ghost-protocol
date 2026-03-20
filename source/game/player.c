@@ -9,6 +9,8 @@
 #include "game/abilities.h"
 #include "game/loot.h"
 #include "game/hud.h"
+#include "game/skills.h"
+#include "game/colors.h"
 #include "engine/input.h"
 #include "engine/collision.h"
 #include "engine/sprite.h"
@@ -25,8 +27,6 @@ PlayerState player_state;
 GameStats game_stats;
 static Entity* p_ent = NULL;
 #define COYOTE_FRAMES 6
-static u8 r_hold_frames = 0;    /* Frames R button held (for ability wheel) */
-static u8 wheel_suppress = 0;  /* Suppress re-open until R released */
 
 /* ---- Player sprite data (16x16, 4 tiles per frame) ---- */
 /* 6 frames: idle0, idle1, run0, run1, jump, shoot */
@@ -165,77 +165,45 @@ static const u16 class_palettes[CLASS_COUNT][16] = {
 #define PLAYER_HITBOX_W 12
 #define PLAYER_HITBOX_H 14
 
-/* ---- Base stat tables ---- */
-/* Stats at level 1 */
-static const s16 base_stats[CLASS_COUNT][5] = {
-    /* HP, ATK, DEF, SPD, LCK */
-    [CLASS_TROJAN]      = { 40, 10, 6, 4, 2 },
-    [CLASS_INFILTRATOR]  = { 30,  7, 4, 8, 5 },
-    [CLASS_TECHNOMANCER] = { 35,  8, 7, 5, 3 },
-};
-/* Per-level gains */
-static const s16 level_gains[CLASS_COUNT][5] = {
-    [CLASS_TROJAN]      = { 3, 2, 1, 1, 0 },
-    [CLASS_INFILTRATOR]  = { 2, 1, 1, 2, 1 },
-    [CLASS_TECHNOMANCER] = { 2, 1, 2, 1, 1 },
+/* ---- Classless base stats (level 0) ---- */
+#define CLASSLESS_HP   20
+#define CLASSLESS_ATK   5
+#define CLASSLESS_DEF   5
+#define CLASSLESS_SPD   5
+#define CLASSLESS_LCK   5
+#define CLASSLESS_GAIN  1
+
+/* Per-class auto-allocation (L5+): 5 pts/level, spread 2+2+1 */
+static const s16 class_alloc[CLASS_COUNT][5] = {
+    [CLASS_TROJAN]       = { 3, 2, 2, 1, 0 },
+    [CLASS_INFILTRATOR]  = { 2, 1, 0, 2, 2 },
+    [CLASS_TECHNOMANCER] = { 2, 2, 1, 0, 2 },
 };
 
 /* ---- Implementation ---- */
 
 void player_get_base_stats(int cls, int lvl, s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    int lv = lvl - 1;
-    if (lv < 0) lv = 0;
-    *hp  = (s16)(base_stats[cls][0] + level_gains[cls][0] * lv);
-    *atk = (s16)(base_stats[cls][1] + level_gains[cls][1] * lv);
-    *def = (s16)(base_stats[cls][2] + level_gains[cls][2] * lv);
-    *spd = (s16)(base_stats[cls][3] + level_gains[cls][3] * lv);
-    *lck = (s16)(base_stats[cls][4] + level_gains[cls][4] * lv);
-}
+    *hp  = CLASSLESS_HP;
+    *atk = CLASSLESS_ATK;
+    *def = CLASSLESS_DEF;
+    *spd = CLASSLESS_SPD;
+    *lck = CLASSLESS_LCK;
 
-static void apply_evolution_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    /* Legacy evolution bonuses (replaced by tier system in future tasks) */
-    switch (player_state.evolution) {
-    case 1:  /* Vanguard: HP+30%, DEF+20% */
-        *hp  = (s16)(*hp * 130 / 100);
-        *def = (s16)(*def * 120 / 100);
-        break;
-    case 2:  /* Commando: ATK+25% */
-        *atk = (s16)(*atk * 125 / 100);
-        break;
-    case 3:  /* Phantom: SPD+15% */
-        *spd = (s16)(*spd * 115 / 100);
-        break;
-    case 4:  /* Striker: SPD+30% */
-        *spd = (s16)(*spd * 130 / 100);
-        break;
-    case 5:  /* Architect: HP+15%, DEF+15% */
-        *hp  = (s16)(*hp * 115 / 100);
-        *def = (s16)(*def * 115 / 100);
-        break;
-    case 6:  /* Hacker: ATK+20% */
-        *atk = (s16)(*atk * 120 / 100);
-        break;
-    default: break;
+    int classless_levels = (lvl < TIER_1_LEVEL) ? lvl : (TIER_1_LEVEL - 1);
+    *hp  += (s16)(classless_levels * 2);
+    *atk += (s16)(classless_levels * CLASSLESS_GAIN);
+    *def += (s16)(classless_levels * CLASSLESS_GAIN);
+    *spd += (s16)(classless_levels * CLASSLESS_GAIN);
+    *lck += (s16)(classless_levels * CLASSLESS_GAIN);
+
+    if (lvl >= TIER_1_LEVEL && cls >= 0 && cls < CLASS_COUNT) {
+        int class_levels = lvl - TIER_1_LEVEL + 1;
+        *hp  += (s16)(class_levels * class_alloc[cls][0]);
+        *atk += (s16)(class_levels * class_alloc[cls][1]);
+        *def += (s16)(class_levels * class_alloc[cls][2]);
+        *spd += (s16)(class_levels * class_alloc[cls][3]);
+        *lck += (s16)(class_levels * class_alloc[cls][4]);
     }
-    (void)lck;
-}
-
-static void apply_skill_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
-    /* Offense branch (skills 0-3): 0=crit(enemy.c), 1=ATK%, 2=charge speed(abilities.c), 3=AoE(cosmetic) */
-    int atk_bonus = player_state.skill_tree[1] * 5;  /* +5/10/15% ATK */
-    if (atk_bonus > 0) *atk = (s16)(*atk * (100 + atk_bonus) / 100);
-
-    /* Defense branch (skills 4-7): 4=max HP%, 5=DEF%, 6=regen(abilities.c), 7=resist(player_take_damage) */
-    int hp_bonus = player_state.skill_tree[4] * 5;   /* +5/10/15% HP */
-    if (hp_bonus > 0) *hp = (s16)(*hp * (100 + hp_bonus) / 100);
-    int def_bonus = player_state.skill_tree[5] * 5;  /* +5/10/15% DEF */
-    if (def_bonus > 0) *def = (s16)(*def * (100 + def_bonus) / 100);
-
-    /* Utility branch (skills 8-11): 8=SPD%, 9=LCK%, 10=XP(player_add_xp), 11=credits(enemy.c/boss.c) */
-    int spd_bonus = player_state.skill_tree[8] * 5;  /* +5/10/15% SPD */
-    if (spd_bonus > 0) *spd = (s16)(*spd * (100 + spd_bonus) / 100);
-    int lck_bonus = player_state.skill_tree[9] * 5;  /* +5/10/15% LCK */
-    if (lck_bonus > 0) *lck = (s16)(*lck * (100 + lck_bonus) / 100);
 }
 
 static void apply_equipment_bonuses(s16* hp, s16* atk, s16* def, s16* spd, s16* lck) {
@@ -319,40 +287,15 @@ static void compute_stats(void) {
                           &player_state.max_hp, &player_state.atk,
                           &player_state.def, &player_state.spd,
                           &player_state.lck);
-    /* Apply evolution and skill tree bonuses on top of base stats */
-    apply_evolution_bonuses(&player_state.max_hp, &player_state.atk,
-                            &player_state.def, &player_state.spd,
-                            &player_state.lck);
-    apply_skill_bonuses(&player_state.max_hp, &player_state.atk,
-                        &player_state.def, &player_state.spd,
-                        &player_state.lck);
-    /* Apply equipment bonuses */
     apply_equipment_bonuses(&player_state.max_hp, &player_state.atk,
                             &player_state.def, &player_state.spd,
                             &player_state.lck);
+    if (player_state.hp > player_state.max_hp)
+        player_state.hp = player_state.max_hp;
 }
 
 void player_recompute_stats(void) {
     compute_stats();
-}
-
-static void check_ability_unlocks(void) {
-    int lv = player_state.level;
-    u8 mask = 0;
-    if (lv >= AB_UNLOCK_1) mask |= ABILITY_1;
-    if (lv >= AB_UNLOCK_2) mask |= ABILITY_2;
-    if (lv >= AB_UNLOCK_3) mask |= ABILITY_3;
-    if (lv >= AB_UNLOCK_4) mask |= ABILITY_4;
-    if (lv >= AB_UNLOCK_5) mask |= ABILITY_5;
-    if (lv >= AB_UNLOCK_6) mask |= ABILITY_6;
-    if (lv >= AB_UNLOCK_7) mask |= ABILITY_7;
-    if (lv >= AB_UNLOCK_8) mask |= ABILITY_8;
-    player_state.ability_unlocks = mask;
-
-    /* Check if evolution is available (legacy, level 20) */
-    if (lv >= 20 && player_state.evolution == 0) {
-        player_state.evolution_pending = 1;
-    }
 }
 
 /* player_init: Full initialization for a NEW character.
@@ -360,42 +303,35 @@ static void check_ability_unlocks(void) {
  * INTEGRATION NOTE: Only call this for character creation. For level re-entry,
  * call player_init_level() instead to preserve persistent fields. */
 void player_init(int player_class) {
-    /* Bounds check */
-    if (player_class < 0 || player_class >= CLASS_COUNT) player_class = 0; /* default CLASS_TROJAN */
-
-    /* Spawn entity */
     entity_init();
     p_ent = entity_spawn(ENT_PLAYER);
     if (!p_ent) return;
 
-    /* Clear ALL state (new character) */
     memset(&player_state, 0, sizeof(player_state));
     player_state.player_class = (u8)player_class;
-    player_state.level = 1;
+    player_state.tier_choices[0] = 0xFF;
+    player_state.tier_choices[1] = 0xFF;
+    player_state.tier_choices[2] = 0xFF;
+    player_state.slotted_skill = 0xFF;
+    player_state.level = 0;
     player_state.state = PSTATE_IDLE;
-    player_state.credits = 100;
-    r_hold_frames = 0;
+    player_state.credits = 0;
 
-    /* Compute stats */
     compute_stats();
     player_state.hp = player_state.max_hp;
-
-    check_ability_unlocks();
     ability_reset();
 
-    /* Setup entity */
     p_ent->x = FP8(64);
     p_ent->y = FP8(128);
     p_ent->width = PLAYER_HITBOX_W;
     p_ent->height = PLAYER_HITBOX_H;
     p_ent->facing = FACING_RIGHT;
-
-    /* Init safe position to spawn point (death plane fallback) */
     player_state.last_safe_x = p_ent->x;
     player_state.last_safe_y = p_ent->y;
 
-    /* Set initial jumps from class physics */
-    player_state.jumps_remaining = physics_class[player_class].max_jumps;
+    /* Physics: classless uses CLASS_TROJAN params as default */
+    int phys_cls = (player_class >= 0 && player_class < CLASS_COUNT) ? player_class : CLASS_TROJAN;
+    player_state.jumps_remaining = physics_class[phys_cls].max_jumps;
 
     /* Allocate OAM sprite (16x16) */
     int oam = sprite_alloc();
@@ -411,7 +347,9 @@ void player_init(int player_class) {
 
     /* Load graphics */
     memcpy16(&tile_mem_obj[0][PLAYER_TILE_BASE], player_tiles, sizeof(player_tiles) / 2);
-    memcpy16(&pal_obj_mem[PLAYER_PAL_BANK * 16], class_palettes[player_class], 16);
+    int pal_cls = (player_class >= 0 && player_class < CLASS_COUNT) ? player_class : CLASS_TROJAN;
+    memcpy16(&pal_obj_mem[PLAYER_PAL_BANK * 16], class_palettes[pal_cls], 16);
+    colors_apply_player_palette(player_state.suit_color, player_state.visor_color);
 
     /* Init projectile pool */
     projectile_init();
@@ -423,8 +361,8 @@ void player_init_level(void) {
     size_t offset = offsetof(PlayerState, _level_scope_start);
     memset((u8*)&player_state + offset, 0, sizeof(PlayerState) - offset);
     player_state.hp = player_state.max_hp;
-    player_state.jumps_remaining = physics_class[player_state.player_class].max_jumps;
-    r_hold_frames = 0;
+    int phys_cls = (player_state.player_class < CLASS_COUNT) ? player_state.player_class : CLASS_TROJAN;
+    player_state.jumps_remaining = physics_class[phys_cls].max_jumps;
     ability_reset();
 }
 
@@ -458,8 +396,12 @@ void player_enter_level(void) {
 
     /* Load player graphics into VRAM */
     memcpy16(&tile_mem_obj[0][PLAYER_TILE_BASE], player_tiles, sizeof(player_tiles) / 2);
+
+    /* Load base palette then apply customization colors */
+    int pal_cls = (player_state.player_class < CLASS_COUNT) ? player_state.player_class : CLASS_TROJAN;
     memcpy16(&pal_obj_mem[PLAYER_PAL_BANK * 16],
-             class_palettes[player_state.player_class], 16);
+             class_palettes[pal_cls], 16);
+    colors_apply_player_palette(player_state.suit_color, player_state.visor_color);
 }
 
 Entity* player_get(void) {
@@ -607,14 +549,8 @@ static void do_shoot(void) {
     case CLASS_INFILTRATOR:
     {
         int cd = weapon ? GP_MAX(base_cooldown - 3, 4) : 6;
-        /* Skill tree[3] (Pierce): chance to add PROJ_PIERCE to shots
-         * Rank 1: 20%, Rank 2: 40%, Rank 3: 65% */
+        /* TODO: pierce chance driven by skill ranks — added in Task 11 */
         u8 pierce_flags = 0;
-        if (player_state.skill_tree[3] > 0) {
-            int pierce_chance = player_state.skill_tree[3] * 15 + player_state.skill_tree[3] * 5;
-            if ((int)rand_range(100) < pierce_chance)
-                pierce_flags = PROJ_PIERCE;
-        }
         if (wtype == WEAPON_RAPID && weapon) {
             /* Extra fast with bonus speed */
             projectile_spawn(spawn_x, spawn_y, (s16)(dir_x * 3 / 2), 0,
@@ -707,13 +643,10 @@ void player_update(void) {
     if (!p_ent || player_state.state == PSTATE_DEAD) return;
 
     int cls = player_state.player_class;
-    const PhysicsParams* phys = &physics_class[cls];
+    int phys_cls = (cls < CLASS_COUNT) ? cls : CLASS_TROJAN;
+    const PhysicsParams* phys = &physics_class[phys_cls];
 
-    /* Effective move speed: skill tree index 8 (SPD) boosts movement */
     int effective_speed = phys->move_speed;
-    if (player_state.skill_tree[8] > 0) {
-        effective_speed = effective_speed + (effective_speed * player_state.skill_tree[8] * 5 / 100);
-    }
 
     /* Tick timers */
     if (player_state.shoot_cooldown > 0) player_state.shoot_cooldown--;
@@ -966,53 +899,8 @@ void player_update(void) {
 
     /* ---- Input ---- */
 
-    /* ==== Ability Wheel (Hold R to assign, Tap R to use) ==== */
-    if (input_held(KEY_R)) {
-        r_hold_frames++;
-        if (!player_state.ability_wheel_open && !wheel_suppress && r_hold_frames >= 6) {
-            /* Only open if player has at least one ability unlocked */
-            if (player_state.ability_unlocks != 0) {
-                player_state.ability_wheel_open = 1;
-                player_state.ability_wheel_slot = player_state.last_used_ability % 4;
-                player_state.ability_wheel_page = player_state.last_used_ability / 4;
-                audio_play_sfx(SFX_MENU_SELECT);
-            } else {
-                hud_notify("NO ABILITIES", 30);
-            }
-        }
-        if (player_state.ability_wheel_open) {
-            /* D-pad assigns ability and closes wheel */
-            int picked = -1;
-            if (input_hit(KEY_UP))    { player_state.ability_wheel_slot = 0; picked = 0; }
-            if (input_hit(KEY_RIGHT)) { player_state.ability_wheel_slot = 1; picked = 1; }
-            if (input_hit(KEY_DOWN))  { player_state.ability_wheel_slot = 2; picked = 2; }
-            if (input_hit(KEY_LEFT))  { player_state.ability_wheel_slot = 3; picked = 3; }
-            if (input_hit(KEY_SELECT)) player_state.ability_wheel_page ^= 1;
-            if (picked >= 0) {
-                int slot = player_state.ability_wheel_page * 4 + picked;
-                if (player_state.ability_unlocks & (1 << slot)) {
-                    player_state.last_used_ability = (u8)slot;
-                    audio_play_sfx(SFX_PICKUP);
-                }
-                player_state.ability_wheel_open = 0;
-                wheel_suppress = 1; /* Prevent re-open until R released */
-            }
-            /* Skip all other input while wheel is open */
-            goto post_input;
-        }
-    }
-
-    if (input_released(KEY_R)) {
-        wheel_suppress = 0;
-        if (player_state.ability_wheel_open) {
-            /* Close wheel without changing assignment */
-            player_state.ability_wheel_open = 0;
-        } else if (r_hold_frames > 0 && r_hold_frames < 6) {
-            /* Quick-cast tap: fire assigned ability */
-            ability_activate(cls, player_state.last_used_ability);
-        }
-        r_hold_frames = 0;
-    }
+    /* ==== R button: fire slotted skill ==== */
+    /* TODO: R-fire and SELECT skill wheel — implemented in Task 11 */
 
     /* Horizontal movement */
     if (input_held(KEY_RIGHT)) {
@@ -1272,8 +1160,7 @@ void player_take_damage(int dmg, s16 kb_vx, s16 kb_vy) {
         actual = actual - reflected;
         if (reflected > 0) enemy_stun_all(reflected);
     }
-    /* Skill tree: defense branch index 3 = resist (flat -1/-2/-3 damage) */
-    actual -= player_state.skill_tree[7];
+    /* TODO: skill rank defense resist — added in Task 11 */
     if (actual < 1) actual = 1;
 
     /* Nano Mesh: flat -1 damage resist */
@@ -1337,8 +1224,8 @@ int player_xp_to_next(void) {
 }
 
 void player_add_xp(int amount) {
-    /* Skill tree: utility branch index 2 = XP bonus (+5/10/15%) */
-    int xp_bonus = player_state.skill_tree[10] * 5;
+    /* TODO: shop_buff_active(CHARGE_XP_BOOSTER) check -- added in Task 11 */
+    int xp_bonus = 0;
     /* XP Booster accessory */
     {
         LootItem* xp_acc = inventory_get_equipped_accessory();
@@ -1346,11 +1233,10 @@ void player_add_xp(int amount) {
             xp_bonus += xp_acc->stat1 * 3;
     }
     if (xp_bonus > 0) amount = amount * (100 + xp_bonus) / 100;
-    /* Use int accumulator to prevent u16 overflow/wrap */
+    /* Use int accumulator to prevent u32 overflow/wrap */
     int xp = (int)player_state.xp + amount;
-    /* Post-story: level cap removed (soft cap 99 for u8 safety) */
-    int cap = game_stats.endgame_unlocked ? 99 : MAX_LEVEL;
-    while (player_state.level < cap) {
+    int cap = game_stats.endgame_unlocked ? MAX_LEVEL_ENDGAME : MAX_LEVEL_BASE;
+    while ((int)player_state.level < cap) {
         int needed = player_xp_to_next();
         if (xp < needed) break;
         xp -= needed;
@@ -1413,14 +1299,11 @@ void player_add_xp(int amount) {
                 hud_notify(lvl_buf, 90);
             }
         }
-        /* 75% heal on level up — maintains endurance tension */
+        /* 75% heal on level up -- maintains endurance tension */
         player_state.hp = (s16)(player_state.max_hp * 3 / 4);
         if (player_state.hp < 1) player_state.hp = 1;
-        check_ability_unlocks();
-        /* Grant skill point every 2 levels */
-        if ((player_state.level & 1) == 0) {
-            player_state.skill_points++;
-        }
+        /* Grant 1 skill point per level */
+        player_state.skill_points++;
         /* Level-up celebration: subtle particles */
         if (p_ent) {
             particle_burst(p_ent->x, p_ent->y - FP8(4), 3, PART_STAR, 180, 16);
@@ -1430,7 +1313,7 @@ void player_add_xp(int amount) {
         if (player_state.invincible_timer < 30)
             player_state.invincible_timer = 30;
         /* Achievement: Max Level */
-        if (player_state.level >= MAX_LEVEL && !ach_unlocked(ACH_MAX_LEVEL)) {
+        if (player_state.level >= MAX_LEVEL_BASE && !ach_unlocked(ACH_MAX_LEVEL)) {
             ach_unlock_celebrate(ACH_MAX_LEVEL);
         }
     }
@@ -1502,102 +1385,40 @@ void player_draw(s32 cam_x, s32 cam_y) {
     /* Projectiles drawn by state_net_draw — NOT here (avoid double-draw) */
 }
 
-/* ---- Skill Tree ---- */
+/* ---- New tier-based helper functions ---- */
 
-int player_skill_points_earned(int level) {
-    /* 1 SP per 2 levels, starting from level 2 */
-    return level / 2;
+int player_has_class(void) {
+    return player_state.player_class != 0xFF;
 }
 
-int player_skill_allocate(int index) {
-    if (index < 0 || index >= SKILL_TREE_SIZE) return 0;
-    if (player_state.skill_tree[index] >= SKILL_MAX_RANK) return 0;
-    if (player_state.skill_points < 1) return 0;
-
-    player_state.skill_tree[index]++;
-    player_state.skill_points--;
-
-    /* Recompute stats with new skill bonuses */
-    s16 old_max_hp = player_state.max_hp;
-    compute_stats();
-    /* Adjust current HP proportionally if max HP changed */
-    if (player_state.max_hp != old_max_hp && old_max_hp > 0) {
-        player_state.hp = (s16)((int)player_state.hp * player_state.max_hp / old_max_hp);
-        if (player_state.hp < 1) player_state.hp = 1;
-    }
-
-    /* Check ACH_SKILL_MASTER: any branch fully maxed? */
-    {
-        int branch = index / SKILLS_PER_BRANCH;
-        int base = branch * SKILLS_PER_BRANCH;
-        int full = 1;
-        for (int i = 0; i < SKILLS_PER_BRANCH; i++) {
-            if (player_state.skill_tree[base + i] < SKILL_MAX_RANK) { full = 0; break; }
-        }
-        if (full) ach_unlock_celebrate(ACH_SKILL_MASTER);
-    }
-
-    return 1;
+int player_get_skill_count(void) {
+    u8 ids[MAX_PLAYER_SKILLS];
+    return skills_get_unlocked(
+        player_state.tier_choices[0],
+        player_state.tier_choices[1],
+        player_state.tier_choices[2],
+        ids);
 }
 
-int player_get_skill_bonus(int branch, int skill_idx) {
-    int idx = branch * SKILLS_PER_BRANCH + skill_idx;
-    if (idx < 0 || idx >= SKILL_TREE_SIZE) return 0;
-    return player_state.skill_tree[idx];
+int player_get_skill_id(int idx) {
+    u8 ids[MAX_PLAYER_SKILLS];
+    int count = skills_get_unlocked(
+        player_state.tier_choices[0],
+        player_state.tier_choices[1],
+        player_state.tier_choices[2],
+        ids);
+    if (idx < 0 || idx >= count) return -1;
+    return ids[idx];
 }
 
-/* ---- Class Evolution (legacy — replaced by tier system) ---- */
-/* evolution values: 0=none, 1=Vanguard, 2=Commando, 3=Phantom, 4=Striker, 5=Architect, 6=Hacker */
-#define LEGACY_EVOLUTION_COUNT 7
-static const char* const evolution_names[LEGACY_EVOLUTION_COUNT] = {
-    "None",
-    "Vanguard",   /* Trojan 1 */
-    "Commando",   /* Trojan 2 */
-    "Phantom",    /* Infiltrator 1 */
-    "Striker",    /* Infiltrator 2 */
-    "Architect",  /* Technomancer 1 */
-    "Hacker",     /* Technomancer 2 */
-};
-
-int player_apply_evolution(int choice) {
-    if (player_state.evolution != 0) return 0;
-    if (choice < 1 || choice > 2) return 0;
-
-    int cls = player_state.player_class;
-    int evo = 0;
-    switch (cls) {
-    case CLASS_TROJAN:
-        evo = (choice == 1) ? 1 : 2;  /* Vanguard or Commando */
-        break;
-    case CLASS_INFILTRATOR:
-        evo = (choice == 1) ? 3 : 4;  /* Phantom or Striker */
-        break;
-    case CLASS_TECHNOMANCER:
-        evo = (choice == 1) ? 5 : 6;  /* Architect or Hacker */
-        break;
-    default: return 0;
-    }
-
-    player_state.evolution = (u8)evo;
-    player_state.evolution_pending = 0;
-    ach_unlock_celebrate(ACH_TIER_UP);
-
-    /* Recompute stats with evolution bonuses */
-    s16 old_max_hp = player_state.max_hp;
-    compute_stats();
-    /* Scale HP proportionally */
-    if (player_state.max_hp != old_max_hp && old_max_hp > 0) {
-        player_state.hp = (s16)((int)player_state.hp * player_state.max_hp / old_max_hp);
-        if (player_state.hp < 1) player_state.hp = 1;
-    }
-
-    return 1;
-}
-
-const char* player_get_evolution_name(void) {
-    int evo = player_state.evolution;
-    if (evo < 0 || evo >= LEGACY_EVOLUTION_COUNT) return "None";
-    return evolution_names[evo];
+const char* player_get_tier_name(void) {
+    if (player_state.tier_choices[2] != 0xFF)
+        return tier_get_name(3, player_state.tier_choices[2]);
+    if (player_state.tier_choices[1] != 0xFF)
+        return tier_get_name(2, player_state.tier_choices[1]);
+    if (player_state.tier_choices[0] != 0xFF)
+        return tier_get_name(1, player_state.tier_choices[0]);
+    return "Classless";
 }
 
 /* Achievement short names (max ~20 chars for hud_notify) */
@@ -1611,20 +1432,6 @@ static const char* const ach_names[ACH_COUNT] = {
     "NG+ Cleared!",    "True Ghost!",    "Endgame!",
     "Bounty Hunter!",  "Mythic Find!",   "Threat Lv5!",
 };
-
-/* ---- Ability Wheel Accessors (for HUD rendering by Stream 3) ---- */
-
-u8 player_ability_wheel_is_open(void) {
-    return player_state.ability_wheel_open;
-}
-
-u8 player_ability_wheel_slot(void) {
-    return player_state.ability_wheel_slot;
-}
-
-u8 player_ability_wheel_page(void) {
-    return player_state.ability_wheel_page;
-}
 
 /* ---- Charge Rush Contact Damage ----
  * INTEGRATION NOTE: enemy.c should call this when the player is in PSTATE_CHARGE
