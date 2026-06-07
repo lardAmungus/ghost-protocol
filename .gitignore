@@ -19,3 +19,6 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Stray temp binaries from sprite/asset tools
+temp*.bin

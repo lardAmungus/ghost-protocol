@@ -176,4 +176,9 @@ const char* player_get_tier_name(void);
  * to apply contact damage to enemies hit by the charge. Returns damage dealt. */
 int player_charge_rush_damage(void);
 
+/* Load player idle sprite into OBJ tile memory and set palette for preview.
+ * Returns OAM index allocated, or -1 on failure. Caller must free via sprite_free().
+ * suit_color/visor_color: color preset indices (0-23). */
+int player_load_preview(int screen_x, int screen_y, int suit_color, int visor_color);
+
 #endif /* GAME_PLAYER_H */

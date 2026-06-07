@@ -9,7 +9,8 @@
 #define STATE_GAMEOVER  4
 #define STATE_WIN       5
 #define STATE_CHARSEL   6
-#define STATE_COUNT     7
+#define STATE_INTRO     7
+#define STATE_COUNT     8
 
 /* Global state transition request (defined in main.c) */
 extern int game_request_state;

@@ -1403,9 +1403,9 @@ void state_net_draw(void) {
 
         /* Player info row 16 */
         {
-            static const char* const cls_short[] = { "ASL", "INF", "TEC" };
-            int cls = player_state.player_class % CLASS_COUNT;
-            terminal_print_pal(5, 16, cls_short[cls], TPAL_CYAN);
+            static const char* const cls_short[] = { "TRJ", "INF", "TEC" };
+            int cls = (player_state.player_class == 0xFF) ? -1 : (player_state.player_class % CLASS_COUNT);
+            terminal_print_pal(5, 16, (cls < 0) ? "---" : cls_short[cls], TPAL_CYAN);
             text_print(9, 16, "Lv");
             text_print_int(11, 16, player_state.level);
             text_print(14, 16, "HP:");

@@ -18,6 +18,7 @@
 #include "engine/input.h"
 #include "engine/audio.h"
 #include "engine/save.h"
+#include "engine/sprite.h"
 #include <string.h>
 
 /* ---- State ---- */
@@ -30,7 +31,10 @@ static int blink_timer;
 static int fade_timer;
 static int fade_target;
 static int fade_in_timer;
+static int preview_oam;    /* OAM index for player sprite preview (-1 = none) */
 #define FADE_FRAMES 15
+#define PREVIEW_X  112     /* Center of 240px screen - 16px sprite / 2 */
+#define PREVIEW_Y   88     /* Roughly center vertically in the preview area */
 
 /* ---- Local helpers ---- */
 
@@ -52,6 +56,14 @@ static void print_two_digit(int tx, int ty, int val) {
     if (val > 99) val = 99;
     text_put_char(tx,     ty, (char)('0' + val / 10));
     text_put_char(tx + 1, ty, (char)('0' + val % 10));
+}
+
+static void refresh_preview(void) {
+    if (preview_oam >= 0) {
+        sprite_free(preview_oam);
+        preview_oam = -1;
+    }
+    preview_oam = player_load_preview(PREVIEW_X, PREVIEW_Y, suit_cursor, visor_cursor);
 }
 
 static void draw_customization(void) {
@@ -126,7 +138,7 @@ static void draw_nav_bar(void) {
 /* ---- State callbacks ---- */
 
 void state_charsel_enter(void) {
-    REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_BG1;
+    REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_BG1 | DCNT_OBJ | DCNT_OBJ_1D;
 
     terminal_init_palette();
     terminal_load_bg();
@@ -147,6 +159,9 @@ void state_charsel_enter(void) {
     for (int i = 0; i < SAVE_SLOTS; i++) {
         if (save_slot_exists(i)) { any_save = 1; break; }
     }
+
+    preview_oam = -1;
+    refresh_preview();
 
     draw_customization();
     draw_nav_bar();
@@ -186,12 +201,14 @@ void state_charsel_update(void) {
                 suit_cursor--;
                 if (suit_cursor < 0) suit_cursor = COLOR_PRESET_COUNT - 1;
                 draw_customization();
+                refresh_preview();
                 audio_play_sfx(SFX_MENU_SELECT);
             }
             if (input_hit(KEY_RIGHT) || input_hit(KEY_R)) {
                 suit_cursor++;
                 if (suit_cursor >= COLOR_PRESET_COUNT) suit_cursor = 0;
                 draw_customization();
+                refresh_preview();
                 audio_play_sfx(SFX_MENU_SELECT);
             }
             if (input_hit(KEY_A)) {
@@ -216,12 +233,14 @@ void state_charsel_update(void) {
                 visor_cursor--;
                 if (visor_cursor < 0) visor_cursor = COLOR_PRESET_COUNT - 1;
                 draw_customization();
+                refresh_preview();
                 audio_play_sfx(SFX_MENU_SELECT);
             }
             if (input_hit(KEY_RIGHT) || input_hit(KEY_R)) {
                 visor_cursor++;
                 if (visor_cursor >= COLOR_PRESET_COUNT) visor_cursor = 0;
                 draw_customization();
+                refresh_preview();
                 audio_play_sfx(SFX_MENU_SELECT);
             }
             if (input_hit(KEY_A)) {
@@ -321,6 +340,10 @@ void state_charsel_draw(void) {
 }
 
 void state_charsel_exit(void) {
+    if (preview_oam >= 0) {
+        sprite_free(preview_oam);
+        preview_oam = -1;
+    }
     text_clear_all();
     REG_BLDCNT = 0;
     REG_BLDY   = 0;

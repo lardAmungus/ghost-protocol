@@ -846,9 +846,18 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
 
     Entity* e = boss_entity;
     int dx = (int)((player_x - e->x) >> 8);
+    int dy = (int)((player_y - e->y) >> 8);
     /* Hysteresis to prevent jitter when player is near center */
     if (dx < -16) e->facing = 1;
     else if (dx > 16) e->facing = 0;
+
+    /* Boss stays dormant until player is within engagement range (~320px) */
+    int adx = dx < 0 ? -dx : dx;
+    int ady = dy < 0 ? -dy : dy;
+    if (boss_state.phase == BPHASE_IDLE && boss_state.phase_timer == 0 &&
+        (adx > 320 || ady > 240)) {
+        return; /* Too far — don't start attack cycle */
+    }
 
     boss_state.phase_timer++;
     int bt = boss_state.type;
@@ -877,11 +886,6 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
             audio_play_sfx(SFX_BOSS_PHASE);
             video_shake(8, 2);
             video_flash_start(2, 6);
-            if (new_stage == 2) {
-                hud_notify("PHASE 2!", 90);
-            } else {
-                hud_notify("FINAL PHASE!", 120);
-            }
             /* Phase transition particle explosion */
             {
                 s32 bcx = e->x + (s32)(e->width << 7);
@@ -896,7 +900,6 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
     if (boss_is_enraged() && !boss_state.enrage_announced &&
         boss_state.phase != BPHASE_DEAD && boss_state.phase != BPHASE_TRANSITION) {
         boss_state.enrage_announced = 1;
-        hud_notify("ENRAGED!", 60);
         video_shake(4, 2);
         audio_play_sfx(SFX_BOSS_ROAR);
         {
@@ -925,8 +928,6 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
         if (boss_state.phase_timer >= (u16)idle_dur) {
             boss_state.phase = BPHASE_ATTACK1;
             boss_state.phase_timer = 0;
-            audio_play_sfx(SFX_SHOOT_CHARGE); /* Attack telegraph */
-            hud_notify("INCOMING!", 20);
         }
         break;
     }
@@ -965,8 +966,7 @@ IWRAM_CODE void boss_update(s32 player_x, s32 player_y) {
             boss_state.phase = BPHASE_VULNERABLE;
             boss_state.phase_timer = 0;
             boss_state.hit_count = 0;
-            /* Vulnerability sparkle burst — signals "attack now!" */
-            hud_notify("STRIKE NOW!", 25);
+            /* Vulnerability sparkle burst */
             particle_burst(e->x + (s32)(e->width << 7), e->y + (s32)(e->height << 7),
                            6, PART_STAR, 180, 20);
             audio_play_sfx(SFX_ABILITY); /* Vulnerability open cue */

@@ -500,6 +500,7 @@ static void do_shoot(void) {
     }
 
     switch (cls) {
+    default: /* Classless (0xFF) defaults to Trojan behavior */
     case CLASS_TROJAN:
     {
         int cd = weapon ? base_cooldown : 12;
@@ -1483,6 +1484,29 @@ static const char* const ach_names[ACH_COUNT] = {
  * to determine contact damage (1.5x ATK). Returns the damage amount. */
 int player_charge_rush_damage(void) {
     return player_state.atk * 3 / 2;
+}
+
+int player_load_preview(int screen_x, int screen_y, int suit_color, int visor_color) {
+    /* Load idle frame (4 tiles) into OBJ tile memory */
+    memcpy16(&tile_mem_obj[0][PLAYER_TILE_BASE], player_tiles, 4 * 32 / 2);
+
+    /* Load base palette (classless = Trojan base) and apply colors */
+    memcpy16(&pal_obj_mem[PLAYER_PAL_BANK * 16], class_palettes[CLASS_TROJAN], 16);
+    colors_apply_player_palette(suit_color, visor_color);
+
+    /* Allocate OAM sprite */
+    int oam = sprite_alloc();
+    if (oam < 0) return -1;
+
+    OBJ_ATTR* spr = sprite_get(oam);
+    if (!spr) { sprite_free(oam); return -1; }
+
+    obj_unhide(spr, ATTR0_REG);
+    spr->attr0 = (u16)((screen_y & ATTR0_Y_MASK) | ATTR0_SQUARE | ATTR0_4BPP);
+    spr->attr1 = (u16)((screen_x & ATTR1_X_MASK) | ATTR1_SIZE_16);
+    spr->attr2 = (u16)(ATTR2_ID(PLAYER_TILE_BASE) | ATTR2_PALBANK(PLAYER_PAL_BANK));
+
+    return oam;
 }
 
 /* Achievement unlock with visual celebration */

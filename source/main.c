@@ -19,6 +19,7 @@
 #include "states/state_net.h"
 #include "states/state_gameover.h"
 #include "states/state_win.h"
+#include "states/state_intro.h"
 #include "game/content_data.h"
 #include "game/content_extra.h"
 
@@ -70,6 +71,12 @@ static const GameState state_table[] = {
         state_charsel_update,
         state_charsel_draw,
         state_charsel_exit
+    },
+    [STATE_INTRO] = {
+        state_intro_enter,
+        state_intro_update,
+        state_intro_draw,
+        state_intro_exit
     },
 };
 

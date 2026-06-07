@@ -14,6 +14,7 @@
 #include "states/state_ids.h"
 #include "states/state_title.h"
 #include "states/state_terminal.h"
+#include "states/state_intro.h"
 
 /* ---- State ---- */
 static int blink_timer;
@@ -63,8 +64,8 @@ static void draw_slot_row(int s, int row) {
     if (save_slot_exists(s)) {
         static EWRAM_BSS SaveData sd;
         if (save_read_slot(&sd, s)) {
-            static const char* const cn[] = { "ASL", "INF", "TEC" };
-            text_print(15, row, cn[sd.player_class % 3]);
+            static const char* const cn[] = { "TRJ", "INF", "TEC" };
+            text_print(15, row, (sd.player_class == 0xFF) ? "---" : cn[sd.player_class % 3]);
             text_print(19, row, "Lv");
             text_print_int(22, row, sd.player_level);
             text_print(25, row, "M");
@@ -247,10 +248,10 @@ void state_title_update(void) {
     }
 
     if (!has_save) {
-        /* No saves — any confirm goes to charsel */
+        /* No saves — any confirm goes to intro prologue */
         if (input_hit(KEY_START) || input_hit(KEY_A)) {
             audio_play_sfx(SFX_MENU_SELECT);
-            start_fade_out(STATE_CHARSEL);
+            start_fade_out(STATE_INTRO);
         }
         return;
     }
@@ -263,9 +264,9 @@ void state_title_update(void) {
     if (input_hit(KEY_START) || input_hit(KEY_A)) {
         audio_play_sfx(SFX_MENU_SELECT);
         if (menu_cursor == 0) {
-            /* New Game */
+            /* New Game — intro prologue first */
             state_terminal_reset();
-            start_fade_out(STATE_CHARSEL);
+            start_fade_out(STATE_INTRO);
         } else {
             /* Continue — enter slot picker */
             slot_mode = 1;

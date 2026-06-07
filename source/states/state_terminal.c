@@ -66,6 +66,8 @@ static int help_page;        /* Selected topic index (0-8) */
 static int help_mode;        /* 0=topic index, 1=topic detail */
 static int last_dialogue_mission; /* Last dialogue shown (avoid re-showing) */
 static int story_page;       /* Current page in story dialogue */
+static int story_char_pos;   /* Typewriter: chars revealed so far */
+static int story_char_timer; /* Typewriter: frame counter for next char */
 static const StoryDialogue* active_dialogue; /* Current story dialogue being shown */
 static int codex_category;   /* 0=enemies, 1=bosses, 2=weapons */
 static int codex_mode;       /* 0=category list, 1=entry list */
@@ -320,6 +322,8 @@ void state_terminal_enter(void) {
             if (active_dialogue) {
                 sub_state = TSUB_STORY;
                 story_page = 0;
+                story_char_pos = 0;
+                story_char_timer = 0;
                 last_dialogue_mission = check_m;
                 text_clear_all();
             }
@@ -805,8 +809,34 @@ static void update_story(void) {
         return;
     }
 
+    /* Typewriter: advance one char every 2 frames */
+    if (story_page < active_dialogue->num_pages) {
+        const char* text = active_dialogue->pages[story_page];
+        int len = (int)strlen(text);
+        if (story_char_pos < len) {
+            story_char_timer++;
+            if (story_char_timer >= 2) {
+                story_char_timer = 0;
+                story_char_pos++;
+            }
+        }
+    }
+
+    /* Two-stage advance: A/B completes page first, then advances */
     if (input_hit(KEY_A) || input_hit(KEY_B)) {
+        if (story_page < active_dialogue->num_pages) {
+            const char* text = active_dialogue->pages[story_page];
+            int len = (int)strlen(text);
+            if (story_char_pos < len) {
+                /* Stage 1: complete current page instantly */
+                story_char_pos = len;
+                return;
+            }
+        }
+        /* Stage 2: advance to next page */
         story_page++;
+        story_char_pos = 0;
+        story_char_timer = 0;
         audio_play_sfx(SFX_MENU_SELECT);
         text_clear_all();
         if (story_page >= active_dialogue->num_pages) {
@@ -853,21 +883,23 @@ static void draw_story(void) {
     int pal = active_dialogue->speaker_pal[story_page];
     const char* text = active_dialogue->pages[story_page];
 
-    /* Render multiline text (split on \n) */
+    /* Render multiline text with typewriter (only show story_char_pos chars) */
     int row = 5;
     int col = 3;
+    int chars_shown = 0;
     for (int i = 0; text[i] != '\0' && row < 16; i++) {
+        if (chars_shown >= story_char_pos) break;
         if (text[i] == '\n') {
             row++;
             col = 3;
         } else {
             if (col < 29) {
-                /* Use terminal_print_pal for colored single char */
                 char buf[2] = { text[i], '\0' };
                 terminal_print_pal(col, row, buf, pal);
                 col++;
             }
         }
+        chars_shown++;
     }
 
     /* Page indicator */
@@ -2217,8 +2249,8 @@ static void draw_save(void) {
 
         if (save_preview[i].exists) {
             if (save_preview[i].valid) {
-                static const char* const cn[] = { "ASL", "INF", "TEC" };
-                text_print(12, row, cn[save_preview[i].player_class % 3]);
+                static const char* const cn[] = { "TRJ", "INF", "TEC" };
+                text_print(12, row, (save_preview[i].player_class == 0xFF) ? "---" : cn[save_preview[i].player_class % 3]);
                 text_print(16, row, "Lv");
                 text_print_int(18, row, save_preview[i].player_level);
                 text_print(4, row + 1, "Act:");
